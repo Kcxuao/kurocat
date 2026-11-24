@@ -34,7 +34,7 @@ export async function setupShortcutManager(): Promise<void> {
   desktopReplay.title = '关闭设置，在宠物周围播放 6 秒真实动画';
   previewControls.append(replay, desktopReplay);
   panel.append(title, effectRow, previewControls, preview, status, list, addBar);
-  document.getElementById('context-menu')!.insertBefore(panel, document.getElementById('btn-desktop-shortcut'));
+  document.getElementById('btn-desktop-shortcut')?.before(panel);
   let busy = false;
   let message = '';
   let failedId: string | null = null;
