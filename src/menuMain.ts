@@ -1,4 +1,5 @@
 import './style.css';
+import { setupShortcutManager } from './shortcutManager';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { DEFAULT_TAIL_KEY_IDS, type KeyboardOrientation, type TailKeyMode } from './catEngine';
@@ -541,3 +542,4 @@ async function bootstrap(): Promise<void> {
 }
 
 void bootstrap();
+void setupShortcutManager();

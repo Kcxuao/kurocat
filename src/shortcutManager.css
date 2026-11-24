@@ -1,0 +1,12 @@
+.shortcut-manager { border-top: 1px solid #ffffff20; margin-top: 12px; padding: 12px 8px 8px; color: #eceff3; }
+.shortcut-manager h3 { font-size: 14px; margin: 0 0 8px; }
+.shortcut-status { color: #d4e68a; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.shortcut-row { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 5px; border: 1px solid #ffffff20; border-radius: 8px; padding: 7px; margin: 8px 0; }
+.shortcut-invalid { border-color: #ec9869; }
+.shortcut-icon { display: flex; align-items: center; justify-content: center; grid-row: span 2; font-size: 24px; }
+.shortcut-row input { min-width: 0; width: 100%; box-sizing: border-box; background: #ffffff0b; color: inherit; border: 1px solid #ffffff25; border-radius: 4px; padding: 5px; }
+.shortcut-path { font-size: 10px; color: #a8adb8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shortcut-actions { display: flex; flex-wrap: wrap; gap: 5px; grid-column: 1 / -1; }
+.shortcut-actions button { background: #ffffff0d; color: inherit; border: 1px solid #ffffff25; padding: 5px 7px; border-radius: 5px; font-size: 11px; cursor: pointer; }
+.shortcut-actions button:hover { background: #ffffff20; }
+.shortcut-actions button:disabled { opacity: .4; cursor: default; }

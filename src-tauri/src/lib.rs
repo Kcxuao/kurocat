@@ -1,5 +1,7 @@
 #![recursion_limit = "256"]
 
+#[cfg(windows)]
+mod shortcuts;
 mod cats;
 mod config;
 mod game_detect;
@@ -538,6 +540,8 @@ fn win_is_menu_still_focused(menu_win: &tauri::WebviewWindow) -> bool {
 /// deadlocks the Windows WebView2 / tao event loop (freezing right-click, left-drag, and tray exit).
 #[tauri::command]
 async fn open_context_menu(app: AppHandle) -> Result<(), String> {
+    #[cfg(windows)]
+    shortcuts::close(&app);
     let Some((mx, my, lw, lh)) = side_menu_geometry(&app) else {
         return Err("side_menu_geometry returned None".into());
     };
@@ -601,6 +605,8 @@ async fn open_context_menu(app: AppHandle) -> Result<(), String> {
             created.on_window_event(move |event| match event {
                 tauri::WindowEvent::Focused(false) => {
                     let state = app_ev.state::<AppState>();
+                    #[cfg(windows)]
+                    if app_ev.state::<shortcuts::State>().dialog.load(Ordering::Relaxed) { return; }
                     let elapsed = state.menu_opened_at.lock().unwrap().elapsed();
                     if elapsed >= Duration::from_millis(360) {
                         if let Some(w) = app_ev.get_webview_window("menu") {
@@ -1658,6 +1664,8 @@ fn start_hit_test_loop(
             std::thread::sleep(Duration::from_millis(25));
 
             if paused_guard.load(Ordering::Relaxed) {
+                #[cfg(windows)]
+                shortcuts::close(&app);
                 continue;
             }
             let Some(win) = app.get_webview_window("main") else {
@@ -1674,6 +1682,8 @@ fn start_hit_test_loop(
                     continue;
                 }
             } else if !win.is_visible().unwrap_or(false) {
+                #[cfg(windows)]
+                shortcuts::close(&app);
                 continue;
             }
             let sf = win.scale_factor().unwrap_or(1.0);
@@ -1822,6 +1832,12 @@ fn start_hit_test_loop(
             // While click-through is locked (and Alt is not held), suppress petting hover so users
             // aren't misled by squinting eyes when the cat is intentionally click-through.
             let over_cat = if effective_locked { false } else { raw_over_cat };
+            #[cfg(windows)]
+            shortcuts::tick(&app, Some((cx,cy)), Some(shortcuts::Rect {
+                x: win_x as f64 + pet_x0*w + bw*cur_scale*sf*0.20,
+                y: win_y as f64 + pet_y0*h + bh*cur_scale*sf*0.22,
+                w: bw*cur_scale*sf*0.60, h: bh*cur_scale*sf*0.60,
+            }), over_cat, !effective_locked && !is_drag && !is_menu && picker_bounds.is_none());
 
             #[cfg(windows)]
             if is_win7_ulw {
@@ -2200,7 +2216,10 @@ pub fn run() {
     let banner_for_setup = update_banner_open.clone();
     let paused_for_setup = paused_guard.clone();
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(windows)]
+    let builder = builder.manage(shortcuts::State::default());
+    builder
         .manage(AppState {
             settings: settings_arc,
             menu_open,
@@ -2388,6 +2407,16 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            #[cfg(windows)]
+            shortcuts::get_shortcuts,
+            #[cfg(windows)]
+            shortcuts::save_shortcuts,
+            #[cfg(windows)]
+            shortcuts::pick_shortcut_target,
+            #[cfg(windows)]
+            shortcuts::launch_shortcut,
+            #[cfg(windows)]
+            shortcuts::shortcut_layout,
             get_settings,
             get_cats,
             get_game_active,
