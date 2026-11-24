@@ -1,0 +1,31 @@
+.shortcut-stage { --fx: #40e0ff; --fx-rgb:64,224,255; isolation:isolate; }
+.shortcut-stage[data-effect="magic"] { --fx:#d28eff; --fx-rgb:210,142,255; }
+.shortcut-fx { position:absolute; left:0; top:0; pointer-events:none; z-index:0; }
+.shortcut-stage .radial-shortcut {
+  box-sizing:border-box; position:absolute; z-index:1; width:48px; height:48px;
+  border-radius:50%; border:1px solid rgba(var(--fx-rgb),.75); padding:0;
+  background:radial-gradient(circle at 35% 25%,#31485cf5,#0c1726f5); color:#fff;
+  display:flex; align-items:center; justify-content:center; font-size:26px;
+  opacity:0; pointer-events:none; cursor:pointer; outline:none; will-change:transform,opacity;
+  box-shadow:inset 0 0 14px rgba(var(--fx-rgb),.18),0 0 14px rgba(var(--fx-rgb),.2);
+  transition:background 120ms,border-color 120ms,box-shadow 120ms;
+}
+.shortcut-stage[data-effect="magic"] .radial-shortcut { background:radial-gradient(circle at 35% 25%,#56346ff5,#21112ff5); }
+.shortcut-stage[data-open="true"] .radial-shortcut { pointer-events:auto; }
+.shortcut-stage .radial-shortcut:hover,.shortcut-stage .radial-shortcut:focus-visible {
+  border-color:#fff; box-shadow:inset 0 0 14px rgba(var(--fx-rgb),.25),0 0 24px rgba(var(--fx-rgb),.75);
+}
+.shortcut-stage .radial-shortcut.activated { background:rgba(var(--fx-rgb),.7); border-color:#fff; box-shadow:0 0 30px var(--fx); }
+.shortcut-stage .radial-shortcut img { object-fit:contain; pointer-events:none; }
+.shortcut-stage.launching .radial-shortcut { pointer-events:none; }
+.shortcut-preview-pet { position:absolute; transform:translate(-50%,-50%); font-size:25px; z-index:1; pointer-events:none; }
+@media (prefers-reduced-motion:reduce) { .shortcut-stage .radial-shortcut { transition:none; } }
+
+.shortcut-stage[data-effect="comic"] { --fx:#ffe234; --fx-rgb:255,226,52; }
+.shortcut-stage[data-effect="comic"] .radial-shortcut {
+  border-radius:9px; border:2px solid #15141b; background:#fffaf0; color:#15141b;
+  box-shadow:2px 3px 0 #15141b;
+}
+.shortcut-stage[data-effect="comic"] .radial-shortcut:hover,
+.shortcut-stage[data-effect="comic"] .radial-shortcut:focus-visible,
+.shortcut-stage[data-effect="comic"] .radial-shortcut.activated { background:#ffe234; }

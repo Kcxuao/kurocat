@@ -34,6 +34,7 @@ objc2-core-foundation = { version = "0.3", default-features = false, features = 
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSDictionary", "NSGeometry", "NSNotification", "NSOperation", "NSProcessInfo", "NSString", "NSValue", "block2"] }
 
 [target.'cfg(windows)'.dependencies]
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "ico"] }
 windows-sys = { version = "0.59", features = [
   "Win32_Foundation",
   "Win32_Graphics_Gdi",

@@ -1734,7 +1734,8 @@ fn start_hit_test_loop(
             // foreground window every ~150ms (and shortly after foreground switches), reasserting
             // HWND_TOPMOST strictly on the window owner thread without stealing focus (SWP_NOACTIVATE).
             #[cfg(windows)]
-            if always_on_top && !is_menu && picker_bounds.is_none() && !is_drag {
+            if always_on_top && !is_menu && picker_bounds.is_none() && !is_drag
+                && !shortcuts::is_showing(&app) {
                 let fg_raw = win_foreground_hwnd();
                 let fg_id = fg_raw as isize;
                 if fg_id != last_fg_hwnd {
@@ -1769,6 +1770,7 @@ fn start_hit_test_loop(
                                     } else {
                                         let app_for_top = app.clone();
                                         let _ = app.run_on_main_thread(move || {
+                                            if shortcuts::is_showing(&app_for_top) { return; }
                                             if let Some(w) = app_for_top.get_webview_window("main") {
                                                 if w.is_visible().unwrap_or(false) {
                                                     win_gentle_reassert_topmost(&w);
@@ -1790,6 +1792,7 @@ fn start_hit_test_loop(
                                     } else {
                                         let app_for_top = app.clone();
                                         let _ = app.run_on_main_thread(move || {
+                                            if shortcuts::is_showing(&app_for_top) { return; }
                                             if let Some(w) = app_for_top.get_webview_window("main") {
                                                 if w.is_visible().unwrap_or(false) {
                                                     win_gentle_reassert_topmost(&w);
@@ -2111,6 +2114,17 @@ fn win7_sync_overlay(window: tauri::WebviewWindow, rects: Vec<i32>, focus_menu: 
 
 #[cfg(windows)]
 fn win_configure_local_webview2_runtime() {
+    // Transparent, non-activating widgets must keep painting even when Chromium
+    // considers their native window occluded. Use one environment for all WebViews.
+    let existing = std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS").unwrap_or_default();
+    let mut args = existing.trim().to_owned();
+    for flag in ["--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding"] {
+        if !args.split_whitespace().any(|arg| arg == flag) {
+            if !args.is_empty() { args.push(' '); }
+            args.push_str(flag);
+        }
+    }
+    std::env::set_var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", args);
     let Ok(exe) = std::env::current_exe() else {
         return;
     };
@@ -2414,9 +2428,15 @@ pub fn run() {
             #[cfg(windows)]
             shortcuts::pick_shortcut_target,
             #[cfg(windows)]
+            shortcuts::pick_shortcut_icon,
+            #[cfg(windows)]
             shortcuts::launch_shortcut,
             #[cfg(windows)]
             shortcuts::shortcut_layout,
+            #[cfg(windows)]
+            shortcuts::set_shortcut_effect,
+            #[cfg(windows)]
+            shortcuts::preview_shortcut_effect,
             get_settings,
             get_cats,
             get_game_active,

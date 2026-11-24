@@ -35,7 +35,14 @@ impl Drop for Com {
         }
     }
 }
-pub fn pick(owner: isize, folder: bool) -> Result<Option<String>, String> {
+#[derive(Clone, Copy)]
+pub enum Picker {
+    Folder,
+    Target,
+    Icon,
+}
+pub fn pick(owner: isize, picker: Picker) -> Result<Option<String>, String> {
+    let folder = matches!(picker, Picker::Folder);
     let _com = Com::new()?;
     unsafe {
         let dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER)
@@ -50,8 +57,14 @@ pub fn pick(owner: isize, folder: bool) -> Result<Option<String>, String> {
             flags |= FOS_FILEMUSTEXIST;
         }
         dialog.SetOptions(flags).map_err(|e| e.to_string())?;
-        let label = wide("应用与 Windows 快捷方式");
-        let filter = wide("*.exe;*.lnk");
+        let (label, filter) = if matches!(picker, Picker::Icon) {
+            (
+                wide("图标图片 (PNG / JPG / ICO)"),
+                wide("*.png;*.jpg;*.jpeg;*.ico"),
+            )
+        } else {
+            (wide("应用与 Windows 快捷方式"), wide("*.exe;*.lnk"))
+        };
         if !folder {
             dialog
                 .SetFileTypes(&[COMDLG_FILTERSPEC {
@@ -236,5 +249,74 @@ pub fn icon(path: &str) -> Result<Vec<u8>, String> {
         DeleteDC(dc);
         DestroyIcon(info.hIcon);
         Ok(rgba)
+    }
+}
+
+/// Decode bounded image data and fit it inside a transparent 32px square.
+pub fn custom_icon(path: &Path) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+    let file = std::fs::File::open(path).map_err(|e| format!("无法读取图片：{e}"))?;
+    let mut bytes = Vec::new();
+    file.take(8 * 1024 * 1024 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| e.to_string())?;
+    decode_custom_icon(&bytes)
+}
+fn decode_custom_icon(bytes: &[u8]) -> Result<Vec<u8>, String> {
+    use image::{ImageFormat, ImageReader, Limits, RgbaImage};
+    if bytes.len() > 8 * 1024 * 1024 {
+        return Err("图片不能超过 8 MB".into());
+    }
+    let mut reader = ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()
+        .map_err(|e| e.to_string())?;
+    if !matches!(
+        reader.format(),
+        Some(ImageFormat::Png | ImageFormat::Jpeg | ImageFormat::Ico)
+    ) {
+        return Err("请选择 PNG、JPG 或 ICO 图片".into());
+    }
+    let mut limits = Limits::default();
+    limits.max_image_width = Some(4096);
+    limits.max_image_height = Some(4096);
+    limits.max_alloc = Some(64 * 1024 * 1024);
+    reader.limits(limits);
+    let image = reader
+        .decode()
+        .map_err(|_| "图片损坏或尺寸超过 4096×4096，请重新选择".to_string())?;
+    let scaled = image
+        .resize(32, 32, image::imageops::FilterType::Lanczos3)
+        .to_rgba8();
+    let mut output = RgbaImage::new(32, 32);
+    image::imageops::overlay(
+        &mut output,
+        &scaled,
+        (32 - scaled.width()) as i64 / 2,
+        (32 - scaled.height()) as i64 / 2,
+    );
+    Ok(output.into_raw())
+}
+
+#[cfg(test)]
+mod custom_icon_tests {
+    use super::*;
+    #[test]
+    fn custom_icon_fits_without_distorting_and_keeps_transparency() {
+        let image = image::RgbaImage::from_pixel(80, 40, image::Rgba([240, 20, 10, 255]));
+        let mut png = std::io::Cursor::new(Vec::new());
+        image.write_to(&mut png, image::ImageFormat::Png).unwrap();
+        let rgba = decode_custom_icon(png.get_ref()).unwrap();
+        assert_eq!(rgba.len(), 4096);
+        assert_eq!(&rgba[..4], &[0, 0, 0, 0]);
+        assert_eq!(&rgba[(16 * 32 + 16) * 4..][..4], &[240, 20, 10, 255]);
+    }
+    #[test]
+    fn custom_icon_rejects_bad_images() {
+        assert!(decode_custom_icon(b"not an image").is_err());
+        assert!(decode_custom_icon(&vec![0; 8 * 1024 * 1024 + 1]).is_err());
+        let image = image::RgbaImage::new(4097, 1);
+        let mut png = std::io::Cursor::new(Vec::new());
+        image.write_to(&mut png, image::ImageFormat::Png).unwrap();
+        assert!(decode_custom_icon(png.get_ref()).is_err());
     }
 }

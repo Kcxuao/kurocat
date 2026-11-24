@@ -17,15 +17,30 @@ pub struct Shortcut {
     pub id: String,
     pub name: String,
     pub path: String,
+    /// Normalized 32x32 RGBA, stored inline so source files can be moved safely.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<Vec<u8>>,
 }
+#[derive(Clone, Copy, Default, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Effect {
+    #[default]
+    Energy,
+    Magic,
+    Comic,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Config {
     version: u8,
+    #[serde(default)]
+    effect: Effect,
     items: Vec<Shortcut>,
 }
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct View {
+    effect: Effect,
     items: Vec<Shortcut>,
     icons: HashMap<String, Vec<u8>>,
     error: Option<String>,
@@ -40,6 +55,8 @@ pub struct State {
     runtime: Mutex<Runtime>,
     pub dialog: AtomicBool,
     busy: AtomicBool,
+    preview_until: Mutex<Option<Instant>>,
+    showing: AtomicBool,
 }
 impl Default for State {
     fn default() -> Self {
@@ -51,6 +68,7 @@ impl Default for State {
             _ if !path().exists() => (
                 Config {
                     version: 1,
+                    effect: Effect::default(),
                     items: vec![],
                 },
                 None,
@@ -58,6 +76,7 @@ impl Default for State {
             _ => (
                 Config {
                     version: 1,
+                    effect: Effect::default(),
                     items: vec![],
                 },
                 Some("快捷配置无法读取，请修复 shortcuts.json 后重启；原文件未覆盖".into()),
@@ -72,6 +91,8 @@ impl Default for State {
             runtime: Mutex::new(Runtime::default()),
             dialog: AtomicBool::new(false),
             busy: AtomicBool::new(false),
+            preview_until: Mutex::new(None),
+            showing: AtomicBool::new(false),
         }
     }
 }
@@ -89,6 +110,12 @@ fn validate(items: &[Shortcut], old: &[Shortcut]) -> Result<(), String> {
         }
         if i.name.trim().is_empty() || i.name.chars().count() > 40 {
             return Err("名称需要 1～40 个字符".into());
+        }
+        if i.icon
+            .as_ref()
+            .is_some_and(|bytes| bytes.len() != 32 * 32 * 4)
+        {
+            return Err("自定义图标数据无效，请重新选择图片".into());
         }
         let p = Path::new(&i.path);
         if !p.is_absolute() || i.path.contains('\0') {
@@ -138,12 +165,16 @@ pub async fn get_shortcuts(
     authorize(&window, false)?;
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<State>();
-        let (items, error) = {
+        let (items, error, effect) = {
             let s = state.store.lock().unwrap();
-            (s.config.items.clone(), s.error.clone())
+            (s.config.items.clone(), s.error.clone(), s.config.effect)
         };
         let mut icons = HashMap::new();
         for i in &items {
+            if let Some(rgba) = &i.icon {
+                icons.insert(i.id.clone(), rgba.clone());
+                continue;
+            }
             let stamp = std::fs::metadata(&i.path)
                 .and_then(|m| m.modified())
                 .unwrap_or(std::time::UNIX_EPOCH);
@@ -170,6 +201,7 @@ pub async fn get_shortcuts(
             }
         }
         View {
+            effect,
             items,
             icons,
             error,
@@ -194,7 +226,11 @@ pub fn save_shortcuts(
         i.name = i.name.trim().into();
     }
     validate(&items, &s.config.items)?;
-    let next = Config { version: 1, items };
+    let next = Config {
+        version: 1,
+        items,
+        effect: s.config.effect,
+    };
     write_config(&path(), &next)?;
     s.config = next;
     s.icons.retain(|p, _| Path::new(p).exists());
@@ -209,6 +245,40 @@ pub async fn pick_shortcut_target(
     app: tauri::AppHandle,
     folder: bool,
 ) -> Result<Option<String>, String> {
+    pick_target(
+        window,
+        app,
+        if folder {
+            native::Picker::Folder
+        } else {
+            native::Picker::Target
+        },
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn pick_shortcut_icon(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+) -> Result<Option<Vec<u8>>, String> {
+    let path = pick_target(window, app, native::Picker::Icon).await?;
+    match path {
+        Some(path) => {
+            tauri::async_runtime::spawn_blocking(move || native::custom_icon(Path::new(&path)))
+                .await
+                .map_err(|e| e.to_string())?
+                .map(Some)
+        }
+        None => Ok(None),
+    }
+}
+
+async fn pick_target(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    picker: native::Picker,
+) -> Result<Option<String>, String> {
     authorize(&window, true)?;
     if app.state::<State>().dialog.swap(true, Ordering::SeqCst) {
         return Err("文件选择器已打开".into());
@@ -219,7 +289,7 @@ pub async fn pick_shortcut_target(
         .map(|h| h.0 as isize)
         .map_err(|e| e.to_string());
     let result = match owner {
-        Ok(hwnd) => tauri::async_runtime::spawn_blocking(move || native::pick(hwnd, folder))
+        Ok(hwnd) => tauri::async_runtime::spawn_blocking(move || native::pick(hwnd, picker))
             .await
             .map_err(|e| e.to_string())
             .and_then(|r| r),
@@ -416,12 +486,21 @@ fn layout(pet: Rect, work: Rect, sf: f64, n: usize) -> Layout {
         p.x += nx - x;
         p.y += ny - y;
     }
+    let margin = 64. * sf;
+    let surface_x = (nx - margin).min(anchor.x - 90. * sf).max(work.x);
+    let surface_y = (ny - margin).min(anchor.y - 90. * sf).max(work.y);
+    let surface_right = (nx + w + margin)
+        .max(anchor.x + 90. * sf)
+        .min(work.x + work.w);
+    let surface_bottom = (ny + h + margin)
+        .max(anchor.y + 90. * sf)
+        .min(work.y + work.h);
     Layout {
         buttons: selected,
-        x: nx,
-        y: ny,
-        w,
-        h,
+        x: surface_x,
+        y: surface_y,
+        w: (surface_right - surface_x).max(1.),
+        h: (surface_bottom - surface_y).max(1.),
         sf,
         anchor,
     }
@@ -474,6 +553,7 @@ struct Runtime {
     epoch: Instant,
     key: Option<(Rect, Rect, f64, usize)>,
     queued: bool,
+    hide_at: Option<Instant>,
 }
 impl Default for Runtime {
     fn default() -> Self {
@@ -486,17 +566,27 @@ impl Default for Runtime {
             epoch: Instant::now(),
             key: None,
             queued: false,
+            hide_at: None,
         }
     }
 }
+pub fn is_showing(app: &tauri::AppHandle) -> bool {
+    app.try_state::<State>()
+        .is_some_and(|state| state.showing.load(Ordering::Relaxed))
+}
 pub fn close(app: &tauri::AppHandle) {
     if let Some(s) = app.try_state::<State>() {
+        s.showing.store(false, Ordering::Relaxed);
         let mut rt = s.runtime.lock().unwrap();
         rt.timer = Timer::default();
         rt.layout = None;
         rt.key = None;
+        rt.hide_at = None;
+        *s.preview_until.lock().unwrap() = None;
     }
+    let _ = app.emit_to("shortcuts", "kuro-shortcuts-visibility", false);
     if let Some(w) = app.get_webview_window("shortcuts") {
+        let _ = w.set_ignore_cursor_events(true);
         let _ = w.hide();
     }
 }
@@ -508,6 +598,12 @@ pub fn tick(
     eligible: bool,
 ) {
     let state = app.state::<State>();
+    let preview = state
+        .preview_until
+        .lock()
+        .unwrap()
+        .is_some_and(|deadline| Instant::now() < deadline);
+    let over = over || preview;
     let count = state.store.lock().unwrap().config.items.len();
     let Some(main) = app.get_webview_window("main") else {
         return;
@@ -539,7 +635,8 @@ pub fn tick(
         x: cx as f64,
         y: cy as f64,
     };
-    if rt.key != Some(key) && count > 0 {
+    let layout_changed = rt.key != Some(key);
+    if layout_changed && count > 0 {
         rt.layout = Some(layout(pet, work, sf, count));
         rt.key = Some(key);
     }
@@ -550,29 +647,48 @@ pub fn tick(
                 .iter()
                 .any(|b| segment_distance(pos, l.anchor, *b) <= 36. * sf)
         });
+    if preview && !rt.timer.open {
+        rt.timer.armed = true;
+    }
     let was = rt.timer.open;
     let now = rt.epoch.elapsed().as_millis() as u64;
     let open = rt.timer.tick(now, eligible, over, keep);
     if !open {
         if was {
+            let _ = app.emit_to("shortcuts", "kuro-shortcuts-visibility", false);
+            if let Some(w) = app.get_webview_window("shortcuts") {
+                let _ = w.set_ignore_cursor_events(true);
+                if eligible {
+                    rt.hide_at = Some(Instant::now() + std::time::Duration::from_millis(730));
+                } else {
+                    let _ = w.hide();
+                    state.showing.store(false, Ordering::Relaxed);
+                    rt.hide_at = None;
+                }
+            }
+        }
+        if rt
+            .hide_at
+            .is_some_and(|deadline| !eligible || Instant::now() >= deadline)
+        {
             if let Some(w) = app.get_webview_window("shortcuts") {
                 let _ = w.hide();
             }
+            rt.hide_at = None;
+            state.showing.store(false, Ordering::Relaxed);
         }
         return;
     }
+    rt.hide_at = None;
     let Some(l) = rt.layout.clone() else {
         return;
     };
     if let Some(w) = app.get_webview_window("shortcuts") {
         let _ =
             w.set_ignore_cursor_events(!l.buttons.iter().any(|p| distance(pos, *p) <= 24. * sf));
-        if !was
-            || w.outer_position()
-                .is_ok_and(|p| p.x != l.x.round() as i32 || p.y != l.y.round() as i32)
-            || w.outer_size()
-                .is_ok_and(|s| s.width != l.w.ceil() as u32 || s.height != l.h.ceil() as u32)
-        {
+        // DPI rounding can differ from the requested size by one pixel. Reapplying
+        // geometry every hit-test tick rebuilds the WebView buttons and cancels animation.
+        if !was || layout_changed {
             let _ = w.set_position(tauri::PhysicalPosition::new(
                 l.x.round() as i32,
                 l.y.round() as i32,
@@ -584,7 +700,9 @@ pub fn tick(
             let _ = app.emit_to("shortcuts", "kuro-shortcuts-layout", &l);
         }
         if !was {
+            state.showing.store(true, Ordering::Relaxed);
             let _ = w.show();
+            let _ = app.emit_to("shortcuts", "kuro-shortcuts-visibility", true);
         }
     } else if !rt.queued {
         rt.queued = true;
@@ -629,9 +747,58 @@ pub fn tick(
 #[tauri::command]
 pub fn shortcut_layout(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Result<(), String> {
     authorize(&window, false)?;
-    if let Some(l) = &app.state::<State>().runtime.lock().unwrap().layout {
+    let state = app.state::<State>();
+    let rt = state.runtime.lock().unwrap();
+    if let Some(l) = &rt.layout {
         let _ = app.emit_to(window.label(), "kuro-shortcuts-layout", l);
     }
+    let _ = app.emit_to(window.label(), "kuro-shortcuts-visibility", rt.timer.open);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn preview_shortcut_effect(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    authorize(&window, true)?;
+    if app
+        .state::<State>()
+        .store
+        .lock()
+        .unwrap()
+        .config
+        .items
+        .is_empty()
+    {
+        return Err("先添加一个快捷入口，再在桌面预览".into());
+    }
+    crate::close_context_menu(app.clone());
+    close(&app);
+    *app.state::<State>().preview_until.lock().unwrap() =
+        Some(Instant::now() + std::time::Duration::from_secs(6));
+    Ok(())
+}
+
+#[tauri::command]
+pub fn set_shortcut_effect(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    effect: Effect,
+) -> Result<(), String> {
+    authorize(&window, true)?;
+    let state = app.state::<State>();
+    let mut store = state.store.lock().unwrap();
+    if let Some(error) = &store.error {
+        return Err(error.clone());
+    }
+    let mut next = store.config.clone();
+    next.effect = effect;
+    write_config(&path(), &next)?;
+    store.config = next;
+    drop(store);
+    close(&app);
+    let _ = app.emit("kuro-shortcuts-changed", ());
     Ok(())
 }
 
@@ -643,6 +810,7 @@ mod tests {
             id: id.into(),
             name: "测试".into(),
             path: "D:\\missing.exe".into(),
+            icon: None,
         }
     }
     #[test]
@@ -654,6 +822,35 @@ mod tests {
         let mut bad = i.clone();
         bad.name = " ".into();
         assert!(validate(&[bad], &[i]).is_err());
+    }
+    #[test]
+    fn custom_icon_config_roundtrip() {
+        let legacy: Shortcut =
+            serde_json::from_str(r#"{"id":"old","name":"旧入口","path":"D:\\missing.exe"}"#)
+                .unwrap();
+        assert!(legacy.icon.is_none());
+        let mut custom = legacy.clone();
+        custom.icon = Some(vec![128; 4096]);
+        let json = serde_json::to_vec(&custom).unwrap();
+        assert_eq!(serde_json::from_slice::<Shortcut>(&json).unwrap(), custom);
+        assert!(validate(&[custom.clone()], &[legacy.clone()]).is_ok());
+        custom.icon = Some(vec![1; 5]);
+        assert!(validate(&[custom], &[legacy]).is_err());
+    }
+    #[test]
+    fn shortcuts_effect_compatibility() {
+        let legacy: Config = serde_json::from_str(r#"{"version":1,"items":[]}"#).unwrap();
+        assert_eq!(legacy.effect, Effect::Energy);
+        let magic: Config =
+            serde_json::from_str(r#"{"version":1,"items":[],"effect":"magic"}"#).unwrap();
+        assert_eq!(magic.effect, Effect::Magic);
+        assert_eq!(
+            serde_json::from_slice::<Config>(&serde_json::to_vec(&magic).unwrap())
+                .unwrap()
+                .effect,
+            Effect::Magic
+        );
+        assert!(serde_json::from_str::<Effect>(r#""unknown""#).is_err());
     }
     #[test]
     fn shortcuts_timer() {
@@ -733,6 +930,7 @@ mod tests {
         let p = dir.join("shortcuts.json");
         let c = Config {
             version: 1,
+            effect: Effect::Magic,
             items: vec![item("b"), item("a")],
         };
         write_config(&p, &c).unwrap();

@@ -13,7 +13,27 @@ export async function setupShortcutManager(): Promise<void> {
   const addFolder = button('添加文件夹', () => add(true));
   const addFile = button('添加应用 / 快捷方式', () => add(false));
   const addBar = document.createElement('div'); addBar.className = 'shortcut-actions'; addBar.append(addFolder, addFile);
-  panel.append(title, status, list, addBar);
+  const effectRow = document.createElement('label'); effectRow.className = 'shortcut-effect-row';
+  effectRow.append('动画风格');
+  const effectSelect = document.createElement('select'); effectSelect.setAttribute('aria-label', '快捷菜单动画风格');
+  for (const [value, label] of [['energy', '能量轨道 · 全息'], ['magic', '魔法阵 · 空间裂缝'], ['comic', '漫画爆格']]) {
+    const option = document.createElement('option'); option.value = value; option.textContent = label; effectSelect.append(option);
+  }
+  effectSelect.addEventListener('change', () => { void operation(async () => {
+    await invoke('set_shortcut_effect', { effect: effectSelect.value }); await refresh(); message = '动画风格已保存';
+  }); });
+  effectRow.append(effectSelect);
+  const preview = document.createElement('div'); preview.className = 'shortcut-effect-preview';
+  const previewControls = document.createElement('div'); previewControls.className = 'shortcut-actions';
+  const replay = button('预览动画', async () => {
+    const { previewEffect } = await import('./shortcutPreview'); previewEffect(preview, effectSelect.value as ShortcutView['effect'], view);
+  });
+  const desktopReplay = button('在桌面播放', async () => {
+    try { await invoke('preview_shortcut_effect'); } catch (error) { message = String(error); render(); }
+  });
+  desktopReplay.title = '关闭设置，在宠物周围播放 6 秒真实动画';
+  previewControls.append(replay, desktopReplay);
+  panel.append(title, effectRow, previewControls, preview, status, list, addBar);
   document.getElementById('context-menu')!.insertBefore(panel, document.getElementById('btn-desktop-shortcut'));
   let busy = false;
   let message = '';
@@ -46,6 +66,7 @@ export async function setupShortcutManager(): Promise<void> {
   }
   function render(): void {
     list.replaceChildren();
+    effectSelect.value = view.effect; effectSelect.disabled = busy || Boolean(view.error);
     status.textContent = view.error || message || (view.items.length ? `${view.items.length}/8 个入口 · 停留在宠物上展开` : '还没有快捷入口，先添加文件夹或应用');
     view.items.forEach((item, index) => {
       const row = document.createElement('div'); row.className = 'shortcut-row';
@@ -57,6 +78,16 @@ export async function setupShortcutManager(): Promise<void> {
       controls.append(button('改名', async () => { await operation(async () => { if (!await save(view.items.map(i => i.id === item.id ? { ...i, name: name.value } : i))) name.value = item.name; }); }));
       const folder = !/\.(exe|lnk)$/i.test(item.path);
       controls.append(button('重新选择', () => replace(item, folder)));
+      const changeIcon = button('更换图标', () => operation(async () => {
+        const icon = await invoke<number[] | null>('pick_shortcut_icon');
+        if (icon) await save(view.items.map(i => i.id === item.id ? { ...i, icon } : i));
+      }));
+      changeIcon.title = '选择 PNG、JPG 或 ICO，最大 8 MB / 4096×4096';
+      const resetIcon = button('恢复系统图标', () => operation(async () => {
+        await save(view.items.map(i => i.id === item.id ? { ...i, icon: null } : i));
+      }));
+      resetIcon.disabled = !item.icon;
+      controls.append(changeIcon, resetIcon);
       // Also allow repairing a shortcut to a target of the other supported kind.
       controls.append(button(folder ? '改选应用' : '改选文件夹', () => replace(item, !folder)));
       const up = button('↑', () => operation(async () => { const next = [...view.items]; [next[index - 1], next[index]] = [next[index], next[index - 1]]; await save(next); }));
