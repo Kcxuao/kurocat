@@ -1,6 +1,9 @@
 #![recursion_limit = "256"]
 
 #[cfg(windows)]
+mod ai_chat;
+
+#[cfg(windows)]
 mod shortcuts;
 mod cats;
 mod config;
@@ -1890,7 +1893,12 @@ fn start_hit_test_loop(
             let over_tail_picker =
                 inside && tail_picker_captures_cursor(picker_bounds, rx, ry, !is_win7_ulw);
 
-            let should_ignore = if is_drag || over_banner || over_tail_picker {
+            #[cfg(windows)]
+            let over_ai_bubble = !effective_locked && inside && ry * win_log_h <= 64.0
+                && ai_chat::bubble_visible(&app);
+            #[cfg(not(windows))]
+            let over_ai_bubble = false;
+            let should_ignore = if is_drag || over_banner || over_tail_picker || over_ai_bubble {
                 false
             } else if effective_locked {
                 true
@@ -2298,7 +2306,7 @@ pub fn run() {
 
     let builder = tauri::Builder::default();
     #[cfg(windows)]
-    let builder = builder.manage(shortcuts::State::default());
+    let builder = builder.manage(shortcuts::State::default()).manage(ai_chat::State::default());
     builder
         .manage(AppState {
             settings: settings_arc,
@@ -2402,6 +2410,8 @@ pub fn run() {
             }
 
             tray::setup_tray(&handle, &s)?;
+            #[cfg(windows)]
+            ai_chat::start(handle.clone());
             input_hook::start_global_hooks(handle.clone());
             privacy::start_password_privacy_watcher(
                 handle.clone(),
@@ -2488,6 +2498,20 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            #[cfg(windows)]
+            ai_chat::open_ai_menu,
+            #[cfg(windows)]
+            ai_chat::ai_bubble,
+            #[cfg(windows)]
+            ai_chat::get_ai_chat,
+            #[cfg(windows)]
+            ai_chat::save_ai_settings,
+            #[cfg(windows)]
+            ai_chat::mute_ai_today,
+            #[cfg(windows)]
+            ai_chat::send_ai_message,
+            #[cfg(windows)]
+            ai_chat::preview_ai_opener,
             #[cfg(windows)]
             shortcuts::get_shortcuts,
             #[cfg(windows)]

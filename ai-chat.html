@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KuroCat · AI 聊天</title>
+</head>
+<body>
+  <nav aria-label="AI 菜单">
+    <button type="button" id="show-chat" aria-pressed="true">聊天</button>
+    <button type="button" id="show-config" aria-pressed="false">模型与搭话</button>
+  </nav>
+  <section id="chat">
+    <div id="history" role="log" aria-label="聊天记录"></div>
+    <div id="replies" aria-label="快捷回复"></div>
+    <form id="send">
+      <input id="message" aria-label="消息" placeholder="和桌宠说一句…" required maxlength="1000" autocomplete="off">
+      <button type="submit">发送</button>
+    </form>
+  </section>
+  <section id="config" hidden>
+    <form id="settings">
+      <label>模型 API 地址 <input id="endpoint" type="url" required placeholder="https://你的服务地址/v1/chat/completions"></label>
+      <label>模型名称 <input id="model" required maxlength="150" placeholder="填写服务提供的模型名"></label>
+      <label>API 密钥 <input id="key" type="password" maxlength="2000" autocomplete="off" placeholder="不需要密钥时留空"></label>
+      <label id="forget-row" hidden><input id="forget-key" type="checkbox"> 清除已保存的密钥</label>
+      <label><input id="proactive" type="checkbox"> 允许桌宠主动搭话</label>
+      <label>搭话频率
+        <select id="frequency">
+          <option value="quiet">安静 · 60–120 分钟</option>
+          <option value="normal">适中 · 30–60 分钟</option>
+          <option value="active">活跃 · 10–25 分钟</option>
+        </select>
+      </label>
+      <div class="controls">
+        <button type="submit">保存设置</button>
+        <button type="button" id="test">测试已保存的连接</button>
+        <button type="button" id="try-opener">试着搭话</button>
+        <button type="button" id="mute">今天别搭话</button>
+      </div>
+      <small>聊天记录保存在本机。请求时，最近几条聊天会发给你配置的模型服务。</small>
+    </form>
+  </section>
+  <p id="status" role="status"></p>
+  <script type="module" src="/src/aiChat.ts"></script>
+</body>
+</html>

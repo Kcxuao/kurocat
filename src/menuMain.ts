@@ -50,7 +50,7 @@ interface UpdateProgressEvent {
   info?: UpdateInfo | null;
 }
 
-type MenuTabId = 'appearance' | 'system';
+type MenuTabId = 'appearance' | 'system' | 'shortcuts';
 
 const isMacPlatform = (): boolean =>
   /Mac/i.test(navigator.platform) || /Macintosh/i.test(navigator.userAgent);
@@ -474,7 +474,7 @@ async function bootstrap(): Promise<void> {
     const tabBtn = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-tab]');
     if (tabBtn) {
       const t = tabBtn.dataset.tab;
-      if (t === 'appearance' || t === 'system') {
+      if (t === 'appearance' || t === 'system' || t === 'shortcuts') {
         switchTab(t);
       }
       return;
@@ -651,3 +651,14 @@ async function bootstrap(): Promise<void> {
 
 void bootstrap();
 void setupShortcutManager();
+
+void invoke<boolean>('is_win7_ulw_mode').then(legacy => {
+  if (legacy || !navigator.userAgent.includes('Windows')) return;
+  const entry = document.getElementById('btn-ai-menu');
+  if (!entry) return;
+  entry.hidden = false;
+  entry.parentElement?.classList.add('has-ai-menu');
+  entry.addEventListener('click', () => {
+    void invoke('open_ai_menu').catch(error => window.alert(String(error)));
+  });
+}).catch(() => {});

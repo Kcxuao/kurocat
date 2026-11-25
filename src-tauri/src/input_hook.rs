@@ -84,6 +84,20 @@ static LAST_HOOK_MOUSE_X: AtomicI32 = AtomicI32::new(i32::MIN);
 static LAST_HOOK_MOUSE_Y: AtomicI32 = AtomicI32::new(i32::MIN);
 #[cfg(windows)]
 const WM_KURO_PAUSE_TOGGLE: u32 = 0x8007; // WM_APP + 7
+#[cfg(windows)]
+const WM_KURO_SHORTCUTS_CHANGED: u32 = 0x8008;
+
+#[cfg(windows)]
+pub(crate) fn refresh_shortcut_hotkeys() {
+    let tid = WIN_HOOK_TID.load(Ordering::SeqCst);
+    if tid != 0 {
+        unsafe {
+            windows_sys::Win32::UI::WindowsAndMessaging::PostThreadMessageW(
+                tid, WM_KURO_SHORTCUTS_CHANGED, 0, 0,
+            );
+        }
+    }
+}
 
 fn is_alt_vk(vk: u32) -> bool {
     matches!(vk, 0x12 | 0xA4 | 0xA5)
@@ -355,6 +369,8 @@ pub fn linux_evdev_to_vk(code: u16) -> Option<u32> {
 }
 
 pub fn start_global_hooks(app: AppHandle) {
+    #[cfg(windows)]
+    let hook_app = app.clone();
     let (tx, rx) = mpsc::channel::<RawHookMsg>();
     let _ = HOOK_TX.set(tx);
 
@@ -584,9 +600,7 @@ pub fn start_global_hooks(app: AppHandle) {
     });
 
     #[cfg(windows)]
-    std::thread::spawn(|| {
-        run_windows_hook_loop();
-    });
+    std::thread::spawn(move || run_windows_hook_loop(hook_app));
 
     #[cfg(target_os = "macos")]
     std::thread::spawn(|| {
@@ -755,12 +769,12 @@ unsafe extern "system" fn mouse_hook_proc(code: i32, wparam: usize, lparam: isiz
 }
 
 #[cfg(windows)]
-fn run_windows_hook_loop() {
+fn run_windows_hook_loop(app: AppHandle) {
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::System::Threading::GetCurrentThreadId;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         GetMessageW, PeekMessageW, SetWindowsHookExW, UnhookWindowsHookEx, MSG, PM_NOREMOVE,
-        WH_KEYBOARD_LL, WH_MOUSE_LL,
+        WH_KEYBOARD_LL, WH_MOUSE_LL, WM_HOTKEY,
     };
 
     unsafe {
@@ -768,6 +782,8 @@ fn run_windows_hook_loop() {
         let mut init_msg: MSG = std::mem::zeroed();
         PeekMessageW(&mut init_msg, std::ptr::null_mut(), 0, 0, PM_NOREMOVE);
         WIN_HOOK_TID.store(GetCurrentThreadId(), Ordering::SeqCst);
+        let mut hotkeys = crate::shortcuts::HotkeyRegistry::new();
+        hotkeys.sync(&app, HOOKS_PAUSED.load(Ordering::SeqCst));
 
         let hmod = GetModuleHandleW(std::ptr::null());
         let mut kb_hook = if HOOKS_PAUSED.load(Ordering::SeqCst) {
@@ -783,7 +799,18 @@ fn run_windows_hook_loop() {
 
         let mut msg: MSG = std::mem::zeroed();
         while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
+            if msg.message == WM_HOTKEY {
+                if !HOOKS_PAUSED.load(Ordering::SeqCst) {
+                    hotkeys.dispatch(&app, msg.wParam as i32);
+                }
+                continue;
+            }
+            if msg.message == WM_KURO_SHORTCUTS_CHANGED {
+                hotkeys.sync(&app, HOOKS_PAUSED.load(Ordering::SeqCst));
+                continue;
+            }
             if msg.message == WM_KURO_PAUSE_TOGGLE {
+                hotkeys.sync(&app, HOOKS_PAUSED.load(Ordering::SeqCst));
                 let pause = msg.wParam != 0;
                 if pause {
                     if !kb_hook.is_null() {

@@ -929,3 +929,5 @@ html.win7-ulw-mode .floating-side-menu {
 .footer-btn.danger:hover {
   background: rgba(255, 92, 92, 0.18);
 }
+#btn-ai-menu[hidden] { display: none; }
+.tab-footer.has-ai-menu { grid-template-columns: auto minmax(0, 1fr) auto; }

@@ -387,7 +387,7 @@ impl Sha256 {
 }
 
 #[cfg(windows)]
-mod winhttp_client {
+pub(crate) mod winhttp_client {
     use super::parse_http_url;
     use std::ffi::c_void;
     use std::ptr::{null, null_mut};
@@ -399,6 +399,7 @@ mod winhttp_client {
         WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_FLAG_SECURE,
         WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_2, WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_3,
         WINHTTP_OPTION_SECURE_PROTOCOLS, WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_QUERY_STATUS_CODE,
+        WINHTTP_OPTION_REDIRECT_POLICY, WINHTTP_OPTION_REDIRECT_POLICY_NEVER,
     };
 
     struct Handle(*mut c_void);
@@ -424,6 +425,21 @@ mod winhttp_client {
         url: &str,
         user_agent: &str,
         extra_headers: Option<&str>,
+        receive_timeout_ms: i32,
+        on_chunk: impl FnMut(&[u8]) -> Result<(), String>,
+    ) -> Result<(), String> {
+        request_stream(url, user_agent, extra_headers, None, receive_timeout_ms, on_chunk)
+    }
+
+    pub(crate) fn post_stream(
+        url: &str, headers: &str, body: &[u8],
+        on_chunk: impl FnMut(&[u8]) -> Result<(), String>,
+    ) -> Result<(), String> {
+        request_stream(url, "KuroCat AI", Some(headers), Some(body), 30_000, on_chunk)
+    }
+
+    fn request_stream(
+        url: &str, user_agent: &str, extra_headers: Option<&str>, body: Option<&[u8]>,
         receive_timeout_ms: i32,
         mut on_chunk: impl FnMut(&[u8]) -> Result<(), String>,
     ) -> Result<(), String> {
@@ -483,11 +499,11 @@ mod winhttp_client {
         let connect_raw = unsafe { WinHttpConnect(session.0, host_w.as_ptr(), port, 0) };
         if connect_raw.is_null() {
             let err = unsafe { GetLastError() };
-            return Err(format!("连接更新服务器失败 (错误码 {})", err));
+            return Err(format!("连接服务器失败 (错误码 {})", err));
         }
         let connect = Handle(connect_raw);
 
-        let verb_w = to_wide("GET");
+        let verb_w = to_wide(if body.is_some() { "POST" } else { "GET" });
         let path_w = to_wide(&path);
         let flags = if is_https { WINHTTP_FLAG_SECURE } else { 0 };
         let req_raw = unsafe {
@@ -503,7 +519,7 @@ mod winhttp_client {
         };
         if req_raw.is_null() {
             let err = unsafe { GetLastError() };
-            return Err(format!("创建更新请求失败 (错误码 {})", err));
+            return Err(format!("创建网络请求失败 (错误码 {})", err));
         }
         let request = Handle(req_raw);
 
@@ -513,18 +529,28 @@ mod winhttp_client {
             None => (null(), 0),
         };
 
+        let (body_ptr, body_len) = if let Some(body) = body {
+            // A provider cannot forward the configured bearer token to another host.
+            let policy = WINHTTP_OPTION_REDIRECT_POLICY_NEVER;
+            if unsafe { WinHttpSetOption(request.0, WINHTTP_OPTION_REDIRECT_POLICY,
+                (&policy as *const u32).cast(), std::mem::size_of_val(&policy) as u32) } == 0
+            {
+                return Err("无法关闭模型接口重定向。".into());
+            }
+            (body.as_ptr().cast(), body.len() as u32)
+        } else { (null(), 0) };
         let sent = unsafe {
-            WinHttpSendRequest(request.0, hdr_ptr, hdr_len, null(), 0, 0, 0)
+            WinHttpSendRequest(request.0, hdr_ptr, hdr_len, body_ptr, body_len, body_len, 0)
         };
         if sent == 0 {
             let err = unsafe { GetLastError() };
-            return Err(format!("连接 GitHub 检查更新失败，请检查网络或代理 (错误码 {})", err));
+            return Err(format!("发送网络请求失败，请检查网络或代理 (错误码 {})", err));
         }
 
         let received = unsafe { WinHttpReceiveResponse(request.0, null_mut()) };
         if received == 0 {
             let err = unsafe { GetLastError() };
-            return Err(format!("等待 GitHub 响应失败，请检查网络或代理 (错误码 {})", err));
+            return Err(format!("等待服务器响应失败，请检查网络或代理 (错误码 {})", err));
         }
 
         let mut status_code: u32 = 0;

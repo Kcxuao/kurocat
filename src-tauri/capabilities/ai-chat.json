@@ -1,0 +1,10 @@
+{
+  "identifier": "ai-chat",
+  "description": "AI conversation window events",
+  "windows": [
+    "ai-chat"
+  ],
+  "permissions": [
+    "core:event:default"
+  ]
+}

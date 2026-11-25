@@ -15,3 +15,15 @@
 .shortcut-effect-row select { background:#252934; color:#eaf2ff; border:1px solid #ffffff30; border-radius:6px; padding:7px 5px; }
 .shortcut-effect-preview { position:relative; height:0; overflow:hidden; border-radius:10px; margin-top:8px; }
 .shortcut-effect-preview:not(:empty) { height:200px; background:radial-gradient(ellipse at center,#242640,#11151e); }
+
+#shortcut-tab[hidden] { display: none; }
+.menu-tabs.has-shortcut-tab { grid-template-columns: 1fr 1fr 1fr; }
+#shortcut-tab-panel .shortcut-manager { padding: 6px 3px; margin: 0; border: 0; }
+.shortcut-hotkey-toggle { display: flex; align-items: center; gap: 5px; margin-top: 10px; font-size: 12px; }
+.shortcut-hotkey { grid-column: 1 / -1; font-size: 11px; color: #d4e68a; }
+.shortcut-hotkey summary, .shortcut-animation summary { cursor: pointer; }
+.shortcut-hotkey-conflict { color: #f6af8a; }
+.shortcut-hotkey .shortcut-actions { margin: 5px 0; align-items: center; }
+.shortcut-hotkey select { background: #252934; color: #eaf2ff; border: 1px solid #ffffff30; border-radius: 4px; padding: 3px; font: inherit; }
+.shortcut-animation { margin-top: 12px; padding-top: 8px; border-top: 1px solid #ffffff25; font-size: 12px; }
+.shortcut-animation .shortcut-effect-row { margin-top: 8px; }

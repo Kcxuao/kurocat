@@ -10,7 +10,9 @@ use std::{
     time::Instant,
 };
 use tauri::{Emitter, Manager};
+mod hotkeys;
 mod native;
+pub(crate) use hotkeys::Registry as HotkeyRegistry;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Shortcut {
@@ -20,6 +22,9 @@ pub struct Shortcut {
     /// Normalized 32x32 RGBA, stored inline so source files can be moved safely.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<Vec<u8>>,
+    // Missing follows the slot default. An empty string disables this item.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hotkey: Option<String>,
 }
 #[derive(Clone, Copy, Default, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -36,13 +41,21 @@ pub struct Config {
     #[serde(default)]
     effect: Effect,
     items: Vec<Shortcut>,
+    #[serde(default = "default_hotkeys_enabled")]
+    hotkeys_enabled: bool,
 }
+fn default_hotkeys_enabled() -> bool {
+    true
+}
+
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct View {
     effect: Effect,
     items: Vec<Shortcut>,
     icons: HashMap<String, Vec<u8>>,
+    hotkeys_enabled: bool,
+    hotkey_status: HashMap<String, hotkeys::Status>,
     error: Option<String>,
 }
 pub struct Store {
@@ -57,6 +70,7 @@ pub struct State {
     busy: AtomicBool,
     preview_until: Mutex<Option<Instant>>,
     showing: AtomicBool,
+    hotkey_status: Mutex<HashMap<String, hotkeys::Status>>,
 }
 impl Default for State {
     fn default() -> Self {
@@ -70,6 +84,7 @@ impl Default for State {
                     version: 1,
                     effect: Effect::default(),
                     items: vec![],
+                    hotkeys_enabled: true,
                 },
                 None,
             ),
@@ -78,6 +93,7 @@ impl Default for State {
                     version: 1,
                     effect: Effect::default(),
                     items: vec![],
+                    hotkeys_enabled: true,
                 },
                 Some("快捷配置无法读取，请修复 shortcuts.json 后重启；原文件未覆盖".into()),
             ),
@@ -93,6 +109,7 @@ impl Default for State {
             busy: AtomicBool::new(false),
             preview_until: Mutex::new(None),
             showing: AtomicBool::new(false),
+            hotkey_status: Mutex::new(HashMap::new()),
         }
     }
 }
@@ -116,6 +133,12 @@ fn validate(items: &[Shortcut], old: &[Shortcut]) -> Result<(), String> {
             .is_some_and(|bytes| bytes.len() != 32 * 32 * 4)
         {
             return Err("自定义图标数据无效，请重新选择图片".into());
+        }
+        if i.hotkey
+            .as_deref()
+            .is_some_and(|s| !s.is_empty() && hotkeys::Chord::parse(s).is_none())
+        {
+            return Err("快捷键需要 Ctrl 或 Alt，并搭配字母、数字或 F1–F11。".into());
         }
         let p = Path::new(&i.path);
         if !p.is_absolute() || i.path.contains('\0') {
@@ -165,9 +188,14 @@ pub async fn get_shortcuts(
     authorize(&window, false)?;
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<State>();
-        let (items, error, effect) = {
+        let (items, error, effect, hotkeys_enabled) = {
             let s = state.store.lock().unwrap();
-            (s.config.items.clone(), s.error.clone(), s.config.effect)
+            (
+                s.config.items.clone(),
+                s.error.clone(),
+                s.config.effect,
+                s.config.hotkeys_enabled,
+            )
         };
         let mut icons = HashMap::new();
         for i in &items {
@@ -200,10 +228,13 @@ pub async fn get_shortcuts(
                 icons.insert(i.id.clone(), rgba);
             }
         }
+        let hotkey_status = state.hotkey_status.lock().unwrap().clone();
         View {
             effect,
             items,
             icons,
+            hotkeys_enabled,
+            hotkey_status,
             error,
         }
     })
@@ -215,6 +246,7 @@ pub fn save_shortcuts(
     window: tauri::WebviewWindow,
     app: tauri::AppHandle,
     mut items: Vec<Shortcut>,
+    hotkeys_enabled: Option<bool>,
 ) -> Result<(), String> {
     authorize(&window, true)?;
     let state = app.state::<State>();
@@ -230,11 +262,13 @@ pub fn save_shortcuts(
         version: 1,
         items,
         effect: s.config.effect,
+        hotkeys_enabled: hotkeys_enabled.unwrap_or(s.config.hotkeys_enabled),
     };
     write_config(&path(), &next)?;
     s.config = next;
     s.icons.retain(|p, _| Path::new(p).exists());
     drop(s);
+    crate::input_hook::refresh_shortcut_hotkeys();
     close(&app);
     let _ = app.emit("kuro-shortcuts-changed", ());
     Ok(())
@@ -306,6 +340,10 @@ pub async fn launch_shortcut(
     id: String,
 ) -> Result<(), String> {
     authorize(&window, false)?;
+    launch_by_id(app, id).await
+}
+
+async fn launch_by_id(app: tauri::AppHandle, id: String) -> Result<(), String> {
     let state = app.state::<State>();
     if state.busy.swap(true, Ordering::SeqCst) {
         return Err("正在打开，请稍候".into());
@@ -811,6 +849,7 @@ mod tests {
             name: "测试".into(),
             path: "D:\\missing.exe".into(),
             icon: None,
+            hotkey: None,
         }
     }
     #[test]
@@ -931,6 +970,7 @@ mod tests {
         let c = Config {
             version: 1,
             effect: Effect::Magic,
+            hotkeys_enabled: true,
             items: vec![item("b"), item("a")],
         };
         write_config(&p, &c).unwrap();

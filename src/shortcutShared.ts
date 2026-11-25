@@ -1,7 +1,8 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { ShortcutEffect } from './shortcutEffects';
-export interface Shortcut { id: string; name: string; path: string; icon?: number[] | null }
-export interface ShortcutView { effect: ShortcutEffect; items: Shortcut[]; icons: Record<string, number[]>; error: string | null }
+export interface Shortcut { id: string; name: string; path: string; icon?: number[] | null; hotkey?: string }
+export type HotkeyStatus = 'active' | 'conflict' | 'duplicate' | 'paused';
+export interface ShortcutView { hotkeysEnabled?: boolean; hotkeyStatus?: Record<string, HotkeyStatus>; effect: ShortcutEffect; items: Shortcut[]; icons: Record<string, number[]>; error: string | null }
 export const loadShortcuts = () => invoke<ShortcutView>('get_shortcuts');
 export function iconUrl(bytes?: number[]): string | null {
   if (!bytes || bytes.length !== 4096) return null;

@@ -17,7 +17,10 @@
           🐱 外观与互动
         </button>
         <button class="menu-tab-btn" data-tab="system" type="button" role="tab" aria-selected="false">
-          ⚙️ 键盘·OBS·系统
+          ⚙️ 系统
+        </button>
+        <button class="menu-tab-btn" id="shortcut-tab" data-tab="shortcuts" type="button" role="tab" aria-selected="false" hidden>
+          快捷启动
         </button>
       </div>
 
@@ -175,9 +178,11 @@
             <span>重置位置到右下角</span>
           </button>
         </div>
+        <div class="tab-panel hidden" id="shortcut-tab-panel" data-tab-panel="shortcuts"></div>
       </div>
 
       <div class="tab-footer">
+        <button class="footer-btn" id="btn-ai-menu" hidden type="button">AI 聊天</button>
         <button class="footer-btn" data-action="check-update" id="btn-check-update" type="button">
           <span id="update-hint">检查更新 v5.1.0</span>
         </button>

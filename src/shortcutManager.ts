@@ -1,13 +1,19 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { fillIcon, loadShortcuts, type Shortcut, type ShortcutView } from './shortcutShared';
+import { fillIcon, loadShortcuts, type HotkeyStatus, type Shortcut, type ShortcutView } from './shortcutShared';
 import './shortcutManager.css';
 export async function setupShortcutManager(): Promise<void> {
   // The command is Windows-only and rejects Win7. Other platforms keep the existing menu.
   let view: ShortcutView;
   try { view = await loadShortcuts(); } catch { return; }
   const panel = document.createElement('section'); panel.className = 'shortcut-manager';
-  const title = document.createElement('h3'); title.textContent = '悬停快捷菜单';
+  const tab = document.getElementById('shortcut-tab')!;
+  tab.hidden = false;
+  tab.parentElement?.classList.add('has-shortcut-tab');
+  const hotkeys = document.createElement('input'); hotkeys.type = 'checkbox';
+  const hotkeyToggle = document.createElement('label'); hotkeyToggle.className = 'shortcut-hotkey-toggle';
+  hotkeyToggle.append(hotkeys, ' 全局快捷键');
+  hotkeys.onchange = () => { void operation(() => save(view.items, hotkeys.checked).then(() => {})); };
   const status = document.createElement('p'); status.className = 'shortcut-status'; status.setAttribute('role', 'status');
   const list = document.createElement('div');
   const addFolder = button('添加文件夹', () => add(true));
@@ -33,8 +39,11 @@ export async function setupShortcutManager(): Promise<void> {
   });
   desktopReplay.title = '关闭设置，在宠物周围播放 6 秒真实动画';
   previewControls.append(replay, desktopReplay);
-  panel.append(title, effectRow, previewControls, preview, status, list, addBar);
-  document.getElementById('btn-desktop-shortcut')?.before(panel);
+  const animation = document.createElement('details'); animation.className = 'shortcut-animation';
+  const animationTitle = document.createElement('summary'); animationTitle.textContent = '悬停动画';
+  animation.append(animationTitle, effectRow, previewControls, preview);
+  panel.append(addBar, hotkeyToggle, status, list, animation);
+  document.getElementById('shortcut-tab-panel')?.append(panel);
   let busy = false;
   let message = '';
   let failedId: string | null = null;
@@ -43,8 +52,8 @@ export async function setupShortcutManager(): Promise<void> {
     el.addEventListener('click', event => { event.stopPropagation(); if (!busy) void action(); }); return el;
   }
   async function refresh(): Promise<void> { view = await loadShortcuts(); render(); }
-  async function save(items: Shortcut[]): Promise<boolean> {
-    try { await invoke('save_shortcuts', { items }); message = '已保存'; failedId = null; await refresh(); return true; }
+  async function save(items: Shortcut[], hotkeysEnabled?: boolean): Promise<boolean> {
+    try { await invoke('save_shortcuts', { items, hotkeysEnabled }); message = '已保存'; failedId = null; await refresh(); return true; }
     catch (error) { message = String(error); status.textContent = message; return false; }
   }
   async function operation(action: () => Promise<void>): Promise<void> {
@@ -64,8 +73,53 @@ export async function setupShortcutManager(): Promise<void> {
   async function replace(item: Shortcut, folder: boolean): Promise<void> {
     await operation(async () => { const path = await choose(folder); if (path) await save(view.items.map(i => i.id === item.id ? { ...i, path } : i)); });
   }
+  const modifiers = ['Alt', 'Ctrl', 'Ctrl+Alt', 'Alt+Shift', 'Ctrl+Shift', 'Ctrl+Alt+Shift'];
+  const keys = [...'0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ', ...Array.from({ length: 11 }, (_, i) => `F${i + 1}`)];
+  function options(values: string[], label: string): HTMLSelectElement {
+    const select = document.createElement('select'); select.setAttribute('aria-label', label);
+    for (const value of values) select.add(new Option(value.replaceAll('+', ' + '), value));
+    return select;
+  }
+  function updateBadges(): void {
+    const titles: Partial<Record<HotkeyStatus, string>> = {
+      conflict: '已被其他应用或系统占用', duplicate: '与其他入口重复', paused: '已暂停',
+    };
+    for (const badge of list.querySelectorAll<HTMLElement>('[data-hotkey-id]')) {
+      const current = view.hotkeyStatus?.[badge.dataset.hotkeyId!];
+      const title = current && titles[current];
+      badge.textContent = [badge.dataset.chord, title].filter(Boolean).join(' · ');
+      badge.classList.toggle('shortcut-hotkey-conflict', current === 'conflict' || current === 'duplicate');
+    }
+  }
+  function makeHotkeyEditor(item: Shortcut, index: number): HTMLElement {
+    const editor = document.createElement('details'); editor.className = 'shortcut-hotkey';
+    const summary = document.createElement('summary');
+    summary.dataset.hotkeyId = item.id;
+    summary.dataset.chord = item.hotkey === '' ? '快捷键已关闭'
+      : (item.hotkey ?? `Alt+${index + 1}`).replaceAll('+', ' + ');
+    const optionsRow = document.createElement('div'); optionsRow.className = 'shortcut-actions';
+    const modifier = options(modifiers, `${item.name} 的修饰键`);
+    const key = options(keys, `${item.name} 的主键`);
+    const parts = (item.hotkey || `Alt+${index + 1}`).split('+');
+    key.value = parts.pop()!;
+    modifier.value = modifiers.find(value => {
+      const candidate = value.split('+');
+      return candidate.length === parts.length && candidate.every(part => parts.includes(part));
+    }) ?? 'Alt';
+    const change = (hotkey?: string) => operation(async () => {
+      await save(view.items.map(entry => entry.id === item.id ? { ...entry, hotkey } : entry));
+    });
+    optionsRow.append(modifier, key,
+      button('保存按键', () => change(`${modifier.value}+${key.value}`)),
+      button('恢复默认', () => change()),
+      button('关闭此键', () => change('')));
+    editor.append(summary, optionsRow);
+    return editor;
+  }
   function render(): void {
     list.replaceChildren();
+    hotkeys.checked = view.hotkeysEnabled ?? true;
+    hotkeys.disabled = busy || Boolean(view.error);
     effectSelect.value = view.effect; effectSelect.disabled = busy || Boolean(view.error);
     status.textContent = view.error || message || (view.items.length ? `${view.items.length}/8 个入口 · 停留在宠物上展开` : '还没有快捷入口，先添加文件夹或应用');
     view.items.forEach((item, index) => {
@@ -95,15 +149,21 @@ export async function setupShortcutManager(): Promise<void> {
       const down = button('↓', () => operation(async () => { const next = [...view.items]; [next[index + 1], next[index]] = [next[index], next[index + 1]]; await save(next); }));
       down.setAttribute('aria-label', `下移 ${item.name}`); down.disabled = index === view.items.length - 1;
       controls.append(up, down, button('删除', () => operation(async () => { await save(view.items.filter(i => i.id !== item.id)); })));
-      row.append(icon, name, path, controls); list.append(row);
+      row.append(icon, name, path, makeHotkeyEditor(item, index), controls); list.append(row);
     });
+    updateBadges();
     addFolder.disabled = addFile.disabled = view.items.length >= 8 || Boolean(view.error) || busy;
     if (view.items.length >= 8 && !message && !view.error) status.textContent = '已达 8 个入口上限';
     if (view.error) panel.querySelectorAll('button').forEach(b => b.disabled = true);
   }
   await listen('kuro-shortcuts-changed', () => { if (!busy) void refresh().catch(error => { message = String(error); render(); }); });
+  await listen<Record<string, HotkeyStatus>>('kuro-shortcut-hotkeys', event => {
+    view.hotkeyStatus = event.payload; updateBadges();
+  });
   await listen<{ id: string; message: string }>('kuro-shortcut-error', event => {
-    message = event.payload.message.replace(/^INVALID_PATH:/, ''); failedId = event.payload.id; render(); panel.scrollIntoView({ block: 'start' });
+    message = event.payload.message.replace(/^INVALID_PATH:/, ''); failedId = event.payload.id;
+    tab.click(); render();
+    panel.querySelector('.shortcut-invalid')?.scrollIntoView({ block: 'nearest' });
   });
   await listen('kuro-menu-opened', () => { void refresh(); }); render();
 }
