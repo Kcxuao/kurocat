@@ -657,6 +657,13 @@ void invoke<boolean>('is_win7_ulw_mode').then(legacy => {
   const entry = document.getElementById('btn-ai-menu');
   if (!entry) return;
   entry.hidden = false;
+  const feeding = document.getElementById('btn-feeding-menu');
+  if (feeding) {
+    feeding.hidden = false;
+    feeding.addEventListener('click', () => {
+      void invoke('open_feeding').catch(error => window.alert(String(error)));
+    });
+  }
   entry.parentElement?.classList.add('has-ai-menu');
   entry.addEventListener('click', () => {
     void invoke('open_ai_menu').catch(error => window.alert(String(error)));

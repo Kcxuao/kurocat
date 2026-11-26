@@ -11,7 +11,7 @@ use std::{
 };
 use tauri::{Emitter, Manager};
 mod hotkeys;
-mod native;
+pub(crate) mod native;
 pub(crate) use hotkeys::Registry as HotkeyRegistry;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

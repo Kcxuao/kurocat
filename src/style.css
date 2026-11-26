@@ -931,3 +931,6 @@ html.win7-ulw-mode .floating-side-menu {
 }
 #btn-ai-menu[hidden] { display: none; }
 .tab-footer.has-ai-menu { grid-template-columns: auto minmax(0, 1fr) auto; }
+
+#btn-feeding-menu[hidden] { display: none; }
+#btn-feeding-menu { flex-shrink: 0; margin-top: 6px; }

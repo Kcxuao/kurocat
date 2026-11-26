@@ -1,0 +1,18 @@
+:root { color-scheme:dark; color:#eff4e8; background:#1b211c; font:13px system-ui,sans-serif; }
+* { box-sizing:border-box; }
+body { margin:0; }
+main { height:100vh; padding:13px; display:flex; flex-direction:column; gap:8px; }
+header { display:flex; justify-content:space-between; align-items:center; gap:5px; }
+h1 { margin:0; font-size:16px; }
+p { margin:0; }
+button { color:#202713; background:#c7ef83; border:0; border-radius:7px; padding:6px 10px; cursor:pointer; font:inherit; }
+button:disabled { opacity:.5; cursor:default; }
+ol { flex:1; margin:0; padding:7px; min-height:55px; overflow:auto; border:1px dashed #798864; border-radius:8px; list-style:none; }
+li { display:flex; align-items:center; gap:7px; padding:3px; }
+li img, li > span:first-child { width:24px; height:24px; flex:none; text-align:center; }
+li > span:last-child { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#status { color:#cee4a8; min-height:18px; }
+.hint { color:#bbc5b3; font-size:11px; }
+
+.feeding-controls { display:flex; align-items:center; gap:8px; }
+.feeding-controls button { flex:none; }

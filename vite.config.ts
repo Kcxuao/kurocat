@@ -11,6 +11,7 @@ export default defineConfig({
         main: path.resolve(__dirname, 'index.html'),
         menu: path.resolve(__dirname, 'menu.html'),
         aiChat: path.resolve(__dirname, 'ai-chat.html'),
+        feeding: path.resolve(__dirname, 'feeding.html'),
         shortcuts: path.resolve(__dirname, 'shortcuts.html'),
         obs: path.resolve(__dirname, 'obs.html'),
       },

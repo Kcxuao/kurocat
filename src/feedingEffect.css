@@ -1,0 +1,8 @@
+.feeding-effect { pointer-events:none; position:fixed; left:50%; top:48%; z-index:35; }
+.feeding-effect span { position:absolute; opacity:0; color:#f2f0cc; font:bold 12px system-ui; animation:kuro-feeding-crumb 780ms ease-out both; }
+body[data-feeding="walk"] :is(#pet-canvas,#pet-canvas-3d) { animation:kuro-feeding-step 260ms ease-in-out infinite alternate; }
+body[data-feeding="eat"] :is(#pet-canvas,#pet-canvas-3d) { animation:kuro-feeding-chew 250ms ease-in-out 4 alternate; }
+@keyframes kuro-feeding-step { from { translate:0 0; } to { translate:0 -4px; } }
+@keyframes kuro-feeding-chew { from { scale:1; } to { scale:1.015 .975; } }
+@keyframes kuro-feeding-crumb { 10% { opacity:1; } to { transform:translate(var(--dx),-23px) rotate(45deg); opacity:0; } }
+.feeding-drop-target { position:fixed; z-index:36; top:5px; left:4px; right:4px; padding:5px; pointer-events:none; color:#f3ffdd; background:#253126ef; border:1px solid #a9c86c; border-radius:8px; text-align:center; font:12px system-ui,sans-serif; }

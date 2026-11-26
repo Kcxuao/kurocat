@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KuroCat · 文件投喂区</title>
+</head>
+<body>
+  <main>
+    <header><h1>文件投喂区</h1><button id="try-feed" type="button" disabled>试喂一次</button></header>
+    <p id="drop-message">把文件拖进来，在桌面生成零食快捷方式。</p>
+    <ol id="snacks" aria-label="排队等待的食物"></ol>
+    <div class="feeding-controls"><button id="make-hungry" type="button">现在饿了</button><p id="status" role="status"></p></div>
+    <p class="hint">这里投喂会保留原文件。直接拖到桌宠身上，会将原文件移入回收站。</p>
+  </main>
+  <script type="module" src="/src/feeding.ts"></script>
+</body>
+</html>

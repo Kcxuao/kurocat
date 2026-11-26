@@ -2,6 +2,8 @@
 
 #[cfg(windows)]
 mod ai_chat;
+#[cfg(windows)]
+mod feeding;
 
 #[cfg(windows)]
 mod shortcuts;
@@ -1898,7 +1900,16 @@ fn start_hit_test_loop(
                 && ai_chat::bubble_visible(&app);
             #[cfg(not(windows))]
             let over_ai_bubble = false;
-            let should_ignore = if is_drag || over_banner || over_tail_picker || over_ai_bubble {
+            #[cfg(windows)]
+            let over_file_drop = !is_win7_ulw && !effective_locked && inside_pet
+                && (0.12..=0.88).contains(&pet_rx) && (0.14..=0.70).contains(&pet_ry)
+                && unsafe {
+                    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
+                    (GetAsyncKeyState(VK_LBUTTON as i32) as u16 & 0x8000) != 0
+                };
+            #[cfg(not(windows))]
+            let over_file_drop = false;
+            let should_ignore = if is_drag || over_banner || over_tail_picker || over_ai_bubble || over_file_drop {
                 false
             } else if effective_locked {
                 true
@@ -2306,7 +2317,7 @@ pub fn run() {
 
     let builder = tauri::Builder::default();
     #[cfg(windows)]
-    let builder = builder.manage(shortcuts::State::default()).manage(ai_chat::State::default());
+    let builder = builder.manage(shortcuts::State::default()).manage(ai_chat::State::default()).manage(feeding::State::default());
     builder
         .manage(AppState {
             settings: settings_arc,
@@ -2412,6 +2423,8 @@ pub fn run() {
             tray::setup_tray(&handle, &s)?;
             #[cfg(windows)]
             ai_chat::start(handle.clone());
+            #[cfg(windows)]
+            feeding::start(handle.clone());
             input_hook::start_global_hooks(handle.clone());
             privacy::start_password_privacy_watcher(
                 handle.clone(),
@@ -2500,6 +2513,14 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             #[cfg(windows)]
             ai_chat::open_ai_menu,
+            #[cfg(windows)]
+            feeding::open_feeding,
+            #[cfg(windows)]
+            feeding::get_feeding,
+            #[cfg(windows)]
+            feeding::try_feeding,
+            #[cfg(windows)]
+            feeding::make_pet_hungry,
             #[cfg(windows)]
             ai_chat::ai_bubble,
             #[cfg(windows)]

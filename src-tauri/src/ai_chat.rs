@@ -540,7 +540,7 @@ pub async fn send_ai_message(
     .map_err(|e| e.to_string())?
 }
 
-fn fullscreen_foreground() -> bool {
+pub(crate) fn fullscreen_foreground() -> bool {
     use windows_sys::Win32::{
         Foundation::RECT,
         Graphics::Gdi::{
@@ -584,6 +584,7 @@ fn can_interrupt(app: &tauri::AppHandle, from_panel: bool) -> bool {
         && !state.menu_open.load(Ordering::Relaxed)
         && !state.update_banner_open.load(Ordering::Relaxed)
         && !crate::shortcuts::is_showing(app)
+        && !crate::feeding::is_walking(app)
         && app
             .get_webview_window("main")
             .is_some_and(|w| w.is_visible().unwrap_or(false))

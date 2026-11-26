@@ -1,0 +1,6 @@
+{
+  "identifier": "feeding",
+  "description": "File snack tray events",
+  "windows": ["feeding"],
+  "permissions": ["core:event:default"]
+}
