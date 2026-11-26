@@ -1,5 +1,6 @@
 import './aiBubble';
 import './feedingEffect';
+import type { FeedingPhase } from './dafeiyuRenderer';
 import './style.css';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -951,6 +952,10 @@ async function bootstrap(): Promise<void> {
       catList = ev.payload;
       syncMenuUI();
     }
+  });
+
+  await listen<{ phase: FeedingPhase }>('kuro-feeding-effect', ({ payload }) => {
+    engine.setFeedingPhase(payload.phase);
   });
 
   await listen('kuro-open-tail-picker', () => {

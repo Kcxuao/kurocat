@@ -3,6 +3,8 @@ import blinkUrl from './assets/dafeiyu/notail_blink.png';
 import shyUrl from './assets/dafeiyu/notail_shy.png';
 import happyUrl from './assets/dafeiyu/notail_happy2.png';
 
+export type FeedingPhase = 'walk' | 'eat' | 'return' | 'stop';
+
 export interface DaFeiYuLayout {
   logicalW: number;
   kbCenterX: number;
@@ -61,6 +63,25 @@ export class DaFeiYuRenderer {
   private sprites: Record<'idle' | 'blink' | 'shy' | 'happy', HTMLImageElement>;
   private hairBangsCanvas: HTMLCanvasElement | null = null;
   private hairBangsAttempted = false;
+  private feedingPhase: FeedingPhase = 'stop';
+  private feedingStartedAt = 0;
+  private bowlAmount = 0;
+
+  public setFeedingPhase(phase: FeedingPhase, now: number): void {
+    this.feedingPhase = phase;
+    this.feedingStartedAt = now;
+  }
+
+  public get isFeeding(): boolean {
+    return this.feedingPhase !== 'stop';
+  }
+
+  private biteAt(now: number): number {
+    if (this.feedingPhase !== 'eat') return 0;
+    const elapsed = Math.max(0, now - this.feedingStartedAt);
+    const beat = Math.min(2, elapsed / 520);
+    return Math.sin((beat % 1) * Math.PI) ** 2;
+  }
 
   private lastKeyAt = -10000;
   private lastKeyGazeAt = -10000;
@@ -772,6 +793,7 @@ export class DaFeiYuRenderer {
 
     let exprKey: 'idle' | 'blink' | 'shy' | 'happy' = 'idle';
     if (layout.privacyMode) exprKey = 'blink';
+    else if (this.feedingPhase === 'eat') exprKey = this.biteAt(now) > 0.52 ? 'happy' : 'idle';
     else if (isHappy || this.moodTier === 2) exprKey = 'happy';
     else if (this.moodTier === 1) exprKey = 'shy';
     else if (isBlinking) exprKey = 'blink';
@@ -779,9 +801,11 @@ export class DaFeiYuRenderer {
     const img = this.sprites[exprKey] || this.sprites.idle;
     if (img && img.complete && img.naturalWidth > 0) {
       ctx.save();
-      ctx.beginPath();
-      ctx.rect(0, 0, layout.logicalW, layout.kbCenterY - layout.kbHeight * 0.36);
-      ctx.clip();
+      if (!this.isFeeding) {
+        ctx.beginPath();
+        ctx.rect(0, 0, layout.logicalW, layout.kbCenterY - layout.kbHeight * 0.36);
+        ctx.clip();
+      }
       ctx.translate(g.charCenterX, g.pivotY);
       ctx.rotate(this.bodyTilt);
       ctx.scale(1 + this.bodyBob * 0.022, 1 - this.bodyBob * 0.018);
@@ -842,6 +866,15 @@ export class DaFeiYuRenderer {
     const g = this.computeGeom(now, layout);
     const shL = g.spritePointToWorld(0.39, 0.653);
     const shR = g.spritePointToWorld(0.61, 0.653);
+    const holding = !layout.privacyMode && (this.feedingPhase === 'walk' || this.feedingPhase === 'eat');
+    this.bowlAmount += ((holding ? 1 : 0) - this.bowlAmount) * (1 - Math.exp(-15 * dt));
+    const showBowl = !layout.privacyMode && this.bowlAmount > 0.025;
+    const bite = this.biteAt(now);
+    const bowl = g.spritePointToWorld(0.52, 0.712 - 0.022 * bite);
+    const mouth = g.spritePointToWorld(0.499, 0.55);
+    const biteProgress = this.feedingPhase === 'eat'
+      ? Math.min(1, Math.max(0, (now - this.feedingStartedAt) / 1120))
+      : this.feedingPhase === 'return' ? 1 : 0;
     const tailRoot = g.spritePointToWorld(0.56, 0.785);
 
     const isHappy = !layout.privacyMode && layout.petEnergy > 0.25;
@@ -901,6 +934,11 @@ export class DaFeiYuRenderer {
       lTargetY = eyeL.y + shyBob;
       rTargetX = eyeR.x;
       rTargetY = eyeR.y - shyBob;
+    } else if (showBowl) {
+      lTargetX = bowl.x - 27 + bite * (mouth.x - bowl.x + 12);
+      lTargetY = bowl.y + 7 + bite * (mouth.y - bowl.y + 13);
+      rTargetX = bowl.x + 25;
+      rTargetY = bowl.y + 9;
     } else if (isHappy) {
       const cheer = Math.sin(now * 0.016) * 5.0;
       lTargetX = shL.x - 14;
@@ -936,6 +974,8 @@ export class DaFeiYuRenderer {
     this.leftHand.squash *= Math.exp(-14 * dt);
     this.rightHand.squash *= Math.exp(-14 * dt);
 
+    if (showBowl) this.drawRiceBowl(ctx, bowl.x, bowl.y, now, biteProgress, this.bowlAmount);
+
     const maxMouseReach = layout.is108 ? 96 : 88;
     this.drawChubbyArm(
       ctx,
@@ -958,6 +998,10 @@ export class DaFeiYuRenderer {
       mouseMode ? 86 : 72,
     );
 
+    if (showBowl) {
+      this.drawRiceChopsticks(ctx, this.leftHand.x, this.leftHand.y, mouth.x, mouth.y, bite, this.bowlAmount);
+    }
+
     // 4) Water droplets & hearts
     for (const p of this.particles) {
       ctx.save();
@@ -966,6 +1010,121 @@ export class DaFeiYuRenderer {
       ctx.fillText(p.kind === 'heart' ? '💙' : '💧', p.x, p.y);
       ctx.restore();
     }
+  }
+
+  private drawRiceBowl(
+    ctx: CanvasRenderingContext2D, x: number, y: number, now: number, eaten: number, alpha: number,
+  ): void {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.globalAlpha *= alpha;
+    ctx.scale(0.88 + 0.12 * alpha, 0.88 + 0.12 * alpha);
+    ctx.lineJoin = 'round';
+    const porcelain = ctx.createLinearGradient(-30, 0, 28, 15);
+    porcelain.addColorStop(0, '#d4def0');
+    porcelain.addColorStop(0.43, '#fff9ed');
+    porcelain.addColorStop(1, '#b3c9e4');
+    ctx.beginPath();
+    ctx.moveTo(-31, -3);
+    ctx.bezierCurveTo(-28, 22, -15, 25, 0, 25);
+    ctx.bezierCurveTo(15, 25, 28, 22, 31, -3);
+    ctx.closePath();
+    ctx.fillStyle = porcelain;
+    ctx.fill();
+    ctx.strokeStyle = '#364966';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = '#7799c3';
+    ctx.beginPath();
+    ctx.ellipse(0, -3, 31, 8, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    if (eaten < 0.94) {
+      const mound = 1 - eaten * 0.85;
+      ctx.save();
+      ctx.translate(0, -4);
+      ctx.scale(1, mound);
+      ctx.fillStyle = '#fff9e8';
+      ctx.strokeStyle = '#dccfae';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(-26, 2);
+      ctx.quadraticCurveTo(-29, -8, -19, -12);
+      ctx.quadraticCurveTo(-17, -23, -7, -20);
+      ctx.quadraticCurveTo(0, -31, 10, -22);
+      ctx.quadraticCurveTo(19, -23, 20, -14);
+      ctx.quadraticCurveTo(30, -12, 26, 2);
+      ctx.quadraticCurveTo(0, 10, -26, 2);
+      ctx.fill();
+      ctx.stroke();
+      for (const [gx, gy, a] of [[-18,-6,.4],[-10,-11,-.5],[0,-21,.5],[9,-13,-.4],[17,-7,.5],[-3,-6,.4],[6,-3,-.3]]) {
+        ctx.fillStyle = '#efe2c9';
+        ctx.beginPath();
+        ctx.ellipse(gx, gy, 2.7, 1.15, a, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+    ctx.beginPath();
+    ctx.ellipse(0, -3, 31, 8, 0, 0, Math.PI);
+    ctx.strokeStyle = '#fdf8ef';
+    ctx.lineWidth = 2.4;
+    ctx.stroke();
+    // A little blue whale on the porcelain, matching her ocean colors.
+    ctx.fillStyle = '#4d76b2';
+    ctx.beginPath();
+    ctx.moveTo(-9, 14);
+    ctx.quadraticCurveTo(-5, 7, 3, 11);
+    ctx.lineTo(8, 8);
+    ctx.lineTo(8, 14);
+    ctx.quadraticCurveTo(2, 20, -6, 17);
+    ctx.closePath();
+    ctx.fill();
+
+    if (eaten < 0.75) {
+      ctx.lineCap = 'round';
+      ctx.lineWidth = 1.5;
+      for (const side of [-1, 1]) {
+        const rise = (now / 850 + side * 0.22 + 1) % 1;
+        const steamX = side * 9 + Math.sin(now / 160 + side) * 3;
+        const steamY = -22 - rise * 10;
+        ctx.strokeStyle = `rgba(255,248,230,${(1 - rise) * 0.68})`;
+        ctx.beginPath();
+        ctx.moveTo(steamX, steamY);
+        ctx.bezierCurveTo(steamX - 4, steamY - 4, steamX + 4, steamY - 7, steamX + 1, steamY - 10);
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
+
+  private drawRiceChopsticks(
+    ctx: CanvasRenderingContext2D, x: number, y: number, mouthX: number, mouthY: number, bite: number, alpha: number,
+  ): void {
+    const pointing = -2.04 + bite * 1.78;
+    const tipX = x + Math.cos(pointing) * 23;
+    const tipY = y + Math.sin(pointing) * 23;
+    const grainX = tipX + (mouthX - tipX) * bite;
+    const grainY = tipY + (mouthY - tipY) * bite;
+    ctx.save();
+    ctx.globalAlpha *= alpha;
+    ctx.lineCap = 'round';
+    for (const offset of [-2, 2]) {
+      ctx.strokeStyle = offset < 0 ? '#623a29' : '#a76c4d';
+      ctx.lineWidth = 2.3;
+      ctx.beginPath();
+      ctx.moveTo(x - Math.cos(pointing) * 13 + offset, y - Math.sin(pointing) * 13);
+      ctx.lineTo(grainX + offset * 0.6, grainY);
+      ctx.stroke();
+    }
+    if (bite > 0.2 && bite < 0.82) {
+      ctx.fillStyle = '#fff3d6';
+      ctx.beginPath();
+      ctx.ellipse(grainX, grainY - 1, 4, 2.4, 0.1, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
   }
 
   private drawWhaleTail(

@@ -1,5 +1,6 @@
 import { listen } from '@tauri-apps/api/event';
 import './feedingEffect.css';
+import type { FeedingPhase } from './dafeiyuRenderer';
 
 type Kind = 'paper' | 'picture' | 'archive' | 'other';
 if (navigator.userAgent.includes('Windows') && '__TAURI_INTERNALS__' in window) {
@@ -27,8 +28,8 @@ if (navigator.userAgent.includes('Windows') && '__TAURI_INTERNALS__' in window) 
   const particles: Record<Kind, string[]> = {
     paper: ['▱', '◩', '▱'], picture: ['🟨', '🟪', '🟩'], archive: ['◇', '〰', '◇'], other: ['✦', '·', '✧'],
   };
-  void listen<{phase: 'walk' | 'eat' | 'stop'; kind: Kind}>('kuro-feeding-effect', ({ payload }) => {
-    document.body.dataset.feeding = payload.phase;
+  void listen<{phase: FeedingPhase; kind: Kind}>('kuro-feeding-effect', ({ payload }) => {
+    document.body.dataset.feeding = payload.phase === 'return' ? 'walk' : payload.phase;
     effect.replaceChildren();
     if (payload.phase !== 'eat') return;
     for (const [index, symbol] of particles[payload.kind].entries()) {

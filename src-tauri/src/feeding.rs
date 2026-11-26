@@ -651,7 +651,7 @@ pub fn start(app: AppHandle) {
                 }
                 if elapsed >= WALK_MS + EAT_MS && !active.returning {
                     active.returning = true;
-                    pet_effect(&app, "walk", active.kind);
+                    pet_effect(&app, "return", active.kind);
                 }
                 if elapsed >= 2 * WALK_MS + EAT_MS {
                     finish(&app, &main, active, true);

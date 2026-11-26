@@ -9,7 +9,7 @@ import {
 } from './keyboardLayout';
 import { catAudio } from './audio';
 import { resolveCustomSkin, type CatSkinConfig, type ResolvedSkin } from './catSkins';
-import { DaFeiYuRenderer, type DaFeiYuLayout } from './dafeiyuRenderer';
+import { DaFeiYuRenderer, type DaFeiYuLayout, type FeedingPhase } from './dafeiyuRenderer';
 
 export const LOGICAL_W = 420;
 export const LOGICAL_H = 440;
@@ -883,6 +883,12 @@ export class KuroCatEngine {
     this.rafId = null;
     this.idleFrameTimer = null;
     this.isIdlePacing = false;
+  }
+
+  public setFeedingPhase(phase: FeedingPhase): void {
+    const now = performance.now();
+    this.dafeiyu.setFeedingPhase(phase, now);
+    if (this.catBreed === 'dafeiyu') this.wakeCat(now);
   }
 
   public setGameActive(active: boolean): void {
@@ -2242,11 +2248,14 @@ export class KuroCatEngine {
     if (this.catBreed === 'dafeiyu') {
       const now = performance.now();
       const layout = this.buildDaFeiYuLayout();
+      const showDesk = !this.dafeiyu.isFeeding;
       this.dafeiyu.renderBody(ctx, now, layout);
-      this.drawMiniMouse(ctx);
-      this.drawKeyboard(ctx);
+      if (showDesk) {
+        this.drawMiniMouse(ctx);
+        this.drawKeyboard(ctx);
+      }
       this.dafeiyu.renderForeground(ctx, this.lastDt, now, layout);
-      if (this.showKeyBubbles && !this.privacyMode) {
+      if (showDesk && this.showKeyBubbles && !this.privacyMode) {
         this.drawKeyBubbles(ctx);
         this.drawMouseBadges(ctx);
       }
