@@ -185,6 +185,9 @@ fn snapshot(mood: &Mood) -> serde_json::Value {
 }
 
 fn publish(app: &AppHandle, snapshot: serde_json::Value, expression: Option<&str>) {
+    if let Some(bored) = snapshot.get("bored").and_then(serde_json::Value::as_bool) {
+        let _ = app.emit_to("main", "kuro-mood-bored", bored);
+    }
     let _ = app.emit_to("menu", "kuro-mood-changed", snapshot);
     if let Some(expression) = expression {
         let _ = app.emit_to("main", "kuro-mood-expression", expression);
@@ -250,7 +253,9 @@ fn menu(window: &WebviewWindow) -> Result<(), String> {
 
 #[tauri::command]
 pub fn get_mood(window: WebviewWindow, app: AppHandle) -> Result<serde_json::Value, String> {
-    menu(&window)?;
+    if window.label() != "main" || crate::win_needs_win7_ulw() {
+        menu(&window)?;
+    }
     Ok(snapshot(&app.state::<State>().0.lock().unwrap()))
 }
 

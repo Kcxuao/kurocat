@@ -9,7 +9,7 @@ import {
 } from './keyboardLayout';
 import { catAudio } from './audio';
 import { resolveCustomSkin, type CatSkinConfig, type ResolvedSkin } from './catSkins';
-import { DaFeiYuRenderer, type DaFeiYuLayout, type FeedingPhase } from './dafeiyuRenderer';
+import { DaFeiYuRenderer, type DaFeiYuLayout, type FeedingPhase, type MoodMotion } from './dafeiyuRenderer';
 
 export const LOGICAL_W = 420;
 export const LOGICAL_H = 440;
@@ -883,6 +883,14 @@ export class KuroCatEngine {
     this.rafId = null;
     this.idleFrameTimer = null;
     this.isIdlePacing = false;
+  }
+
+  public setMoodMotion(phase: MoodMotion): void {
+    this.dafeiyu.setMoodMotion(phase, performance.now());
+  }
+
+  public setMoodBored(bored: boolean): void {
+    this.dafeiyu.setBored(bored, performance.now());
   }
 
   public setFeedingPhase(phase: FeedingPhase): void {
@@ -2248,7 +2256,7 @@ export class KuroCatEngine {
     if (this.catBreed === 'dafeiyu') {
       const now = performance.now();
       const layout = this.buildDaFeiYuLayout();
-      const showDesk = !this.dafeiyu.isFeeding;
+      const showDesk = !this.dafeiyu.isFeeding && !this.dafeiyu.isPerforming;
       this.dafeiyu.renderBody(ctx, now, layout);
       if (showDesk) {
         this.drawMiniMouse(ctx);

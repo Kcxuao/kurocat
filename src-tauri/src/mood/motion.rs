@@ -102,6 +102,10 @@ impl<'a> Pet<'a> {
         } else {
             walk_duration(from, goal, self.scale).min(4600)
         };
+        if hop {
+            self.phase("crouch");
+            std::thread::sleep(Duration::from_millis(200));
+        }
         self.phase(if hop { "hop" } else { "walk" });
         let frames = duration.div_ceil(FRAME_MS);
         for frame in 1..=frames {
@@ -162,11 +166,23 @@ pub(super) fn perform(
         })
     };
     let completed = if tug {
-        effect(&pet, "tug", TUG)
+        pet.phase("grip");
+        std::thread::sleep(Duration::from_millis(260));
+        let moved = effect(&pet, "tug", TUG);
+        if moved && valid() && pet.owns_position() {
+            pet.phase("stumble");
+            std::thread::sleep(Duration::from_millis(610));
+        }
+        moved
     } else {
-        effect(&pet, "land", LEFT_LANDING)
+        let moved = effect(&pet, "land", LEFT_LANDING)
             && pet.travel(right, true, &valid)
-            && effect(&pet, "land", RIGHT_LANDING)
+            && effect(&pet, "land", RIGHT_LANDING);
+        if moved && valid() && pet.owns_position() {
+            pet.phase("rebound");
+            std::thread::sleep(Duration::from_millis(530));
+        }
+        moved
     };
     if valid() && pet.owns_position() {
         pet.travel(pet.origin, false, &valid);

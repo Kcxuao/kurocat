@@ -1,7 +1,7 @@
 import './aiBubble';
 import './feedingEffect';
 import './mood.css';
-import type { FeedingPhase } from './dafeiyuRenderer';
+import type { FeedingPhase, MoodMotion } from './dafeiyuRenderer';
 import './style.css';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -966,12 +966,18 @@ async function bootstrap(): Promise<void> {
     moodExpressionTimer = window.setTimeout(() => { expression.hidden = true; }, 2400);
   });
 
-  await listen<'walk' | 'hop' | 'tug' | 'land' | 'stop'>('kuro-mood-motion', ({ payload }) => {
+  await listen<MoodMotion>('kuro-mood-motion', ({ payload }) => {
+    engine.setMoodMotion(payload);
     document.body.dataset.moodMotion = '';
-    if (payload === 'tug' || payload === 'land') void document.body.offsetWidth;
-    document.body.dataset.moodMotion = payload;
-    engine.setFeedingPhase(payload === 'walk' || payload === 'hop' ? 'walk' : 'stop');
+    if (settings.catBreed !== 'dafeiyu') {
+      if (payload === 'tug' || payload === 'land') void document.body.offsetWidth;
+      document.body.dataset.moodMotion = payload;
+    }
   });
+  await listen<boolean>('kuro-mood-bored', ({ payload }) => engine.setMoodBored(payload));
+  if (navigator.userAgent.includes('Windows')) {
+    void invoke<{ bored: boolean }>('get_mood').then(({ bored }) => engine.setMoodBored(bored)).catch(() => {});
+  }
 
   await listen<{ phase: FeedingPhase }>('kuro-feeding-effect', ({ payload }) => {
     engine.setFeedingPhase(payload.phase);

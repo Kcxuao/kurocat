@@ -2,6 +2,8 @@ import idleUrl from './assets/dafeiyu/notail_idle.png';
 import blinkUrl from './assets/dafeiyu/notail_blink.png';
 import shyUrl from './assets/dafeiyu/notail_shy.png';
 import happyUrl from './assets/dafeiyu/notail_happy2.png';
+import { sampleDaFeiYuMotion, type MoodMotion } from './dafeiyuMotion';
+export type { MoodMotion } from './dafeiyuMotion';
 
 export type FeedingPhase = 'walk' | 'eat' | 'return' | 'stop';
 
@@ -66,6 +68,51 @@ export class DaFeiYuRenderer {
   private feedingPhase: FeedingPhase = 'stop';
   private feedingStartedAt = 0;
   private bowlAmount = 0;
+  private motion: MoodMotion = 'stop';
+  private motionAt = 0;
+  private boredAt: number | null = null;
+  private wake: { at: number; from: ReturnType<typeof sampleDaFeiYuMotion> } | null = null;
+
+  public setMoodMotion(phase: MoodMotion, now: number): void {
+    this.motion = phase;
+    this.motionAt = now;
+  }
+
+  public setBored(bored: boolean, now: number): void {
+    if (bored === (this.boredAt !== null)) return;
+    if (bored) {
+      this.wake = null;
+      this.boredAt = now;
+    } else {
+      if (!this.isPerforming && !this.isFeeding && this.boredAt !== null) {
+        this.wake = { at: now, from: sampleDaFeiYuMotion('doze', Math.max(0, now - this.boredAt)) };
+      }
+      this.boredAt = null;
+    }
+  }
+
+  public get isPerforming(): boolean {
+    return this.motion !== 'stop';
+  }
+
+  private motionPose(now: number, layout: DaFeiYuLayout) {
+    if (layout.privacyMode || this.isFeeding) return null;
+    if (this.motion !== 'stop') return sampleDaFeiYuMotion(this.motion, Math.max(0, now - this.motionAt));
+    if (this.boredAt !== null) return sampleDaFeiYuMotion('doze', Math.max(0, now - this.boredAt));
+    if (!this.wake) return null;
+    const ms = Math.max(0, now - this.wake.at);
+    if (ms >= 730) return null;
+    const pose = sampleDaFeiYuMotion('wake', ms);
+    const t = Math.min(1, ms / 105);
+    const from = this.wake.from;
+    pose.x = from.x + (pose.x - from.x) * t;
+    pose.y = from.y + (pose.y - from.y) * t;
+    pose.tilt = from.tilt + (pose.tilt - from.tilt) * t;
+    pose.squash = from.squash + (pose.squash - from.squash) * t;
+    pose.tailX = from.tailX + (pose.tailX - from.tailX) * t;
+    pose.tailY = from.tailY + (pose.tailY - from.tailY) * t;
+    return pose;
+  }
 
   public setFeedingPhase(phase: FeedingPhase, now: number): void {
     this.feedingPhase = phase;
@@ -515,18 +562,22 @@ export class DaFeiYuRenderer {
     const charX = layout.is108 ? 268 : 192;
     const baseCharY = layout.is108 ? 366 : 364;
     const breath = Math.sin(now * 0.0034) * 2.2 + this.bodyBob * 3.8 + this.bodyDiveY;
-    const charCenterX = charX + this.bodyShiftX;
-    const charBaseY = baseCharY + breath;
+    const pose = this.motionPose(now, layout);
+    const tilt = pose?.tilt ?? this.bodyTilt;
+    const scaleX = pose ? 1 + pose.squash * 0.45 : 1 + this.bodyBob * 0.022;
+    const scaleY = pose ? 1 - pose.squash : 1 - this.bodyBob * 0.018;
+    const charCenterX = charX + (pose?.x ?? this.bodyShiftX);
+    const charBaseY = baseCharY + (pose?.y ?? breath);
     const drawW = layout.is108 ? 268 : 262;
     const drawH = drawW * (278 / 224);
     const pivotOff = 48;
     const pivotY = charBaseY - pivotOff;
 
     const spritePointToWorld = (normX: number, normY: number) => {
-      const lx = (normX - 0.5) * drawW;
-      const ly = normY * drawH - drawH + pivotOff;
-      const c = Math.cos(this.bodyTilt);
-      const s = Math.sin(this.bodyTilt);
+      const lx = (normX - 0.5) * drawW * scaleX;
+      const ly = (normY * drawH - drawH + pivotOff) * scaleY;
+      const c = Math.cos(tilt);
+      const s = Math.sin(tilt);
       return {
         x: charCenterX + lx * c - ly * s,
         y: pivotY + lx * s + ly * c,
@@ -540,6 +591,10 @@ export class DaFeiYuRenderer {
       drawH,
       pivotOff,
       pivotY,
+      tilt,
+      scaleX,
+      scaleY,
+      pose,
       spritePointToWorld,
     };
   }
@@ -777,16 +832,16 @@ export class DaFeiYuRenderer {
     // Draw whale tail behind body sprite & keyboard so its root emerges naturally from her waist
     // and NEVER floats on top of the keyboard or detaches when shifting left for mouseMode (Fixes #11).
     const tailRoot = g.spritePointToWorld(0.56, 0.785);
-    const tipX = tailRoot.x + this.tail.relX;
-    const tipY = tailRoot.y + this.tail.relY;
+    const tipX = tailRoot.x + (g.pose ? 84 + g.pose.tailX : this.tail.relX);
+    const tipY = tailRoot.y + (g.pose ? -36 + g.pose.tailY : this.tail.relY);
     this.drawWhaleTail(
       ctx,
       tailRoot.x,
       tailRoot.y,
       tipX,
       tipY,
-      this.tail.phase,
-      this.tail.activeWag,
+      g.pose ? 0 : this.tail.phase,
+      g.pose ? Math.sin(now * 0.007) * 0.1 : this.tail.activeWag,
       layout.logicalW,
       'back',
     );
@@ -794,6 +849,7 @@ export class DaFeiYuRenderer {
     let exprKey: 'idle' | 'blink' | 'shy' | 'happy' = 'idle';
     if (layout.privacyMode) exprKey = 'blink';
     else if (this.feedingPhase === 'eat') exprKey = this.biteAt(now) > 0.52 ? 'happy' : 'idle';
+    else if (g.pose) exprKey = g.pose.face;
     else if (isHappy || this.moodTier === 2) exprKey = 'happy';
     else if (this.moodTier === 1) exprKey = 'shy';
     else if (isBlinking) exprKey = 'blink';
@@ -801,14 +857,14 @@ export class DaFeiYuRenderer {
     const img = this.sprites[exprKey] || this.sprites.idle;
     if (img && img.complete && img.naturalWidth > 0) {
       ctx.save();
-      if (!this.isFeeding) {
+      if (!this.isFeeding && !this.isPerforming) {
         ctx.beginPath();
         ctx.rect(0, 0, layout.logicalW, layout.kbCenterY - layout.kbHeight * 0.36);
         ctx.clip();
       }
       ctx.translate(g.charCenterX, g.pivotY);
-      ctx.rotate(this.bodyTilt);
-      ctx.scale(1 + this.bodyBob * 0.022, 1 - this.bodyBob * 0.018);
+      ctx.rotate(g.tilt);
+      ctx.scale(g.scaleX, g.scaleY);
       ctx.drawImage(img, -g.drawW * 0.5, -g.drawH + g.pivotOff, g.drawW, g.drawH);
 
       // Live2D eye gaze toward mouse/keyboard when eyes are open
@@ -816,7 +872,7 @@ export class DaFeiYuRenderer {
         ctx.save();
         ctx.translate(-g.drawW * 0.5, -g.drawH + g.pivotOff);
         ctx.scale(g.drawW / 224, g.drawH / 278);
-        this.renderLiveEyes(ctx, this.eyeGazeX, this.eyeGazeY, this.sprites.idle);
+        this.renderLiveEyes(ctx, g.pose ? 0 : this.eyeGazeX, g.pose ? 0 : this.eyeGazeY, this.sprites.idle);
         ctx.restore();
       }
 
@@ -853,7 +909,43 @@ export class DaFeiYuRenderer {
         }
       }
       ctx.restore();
+      if (g.pose) this.drawMoodDetails(ctx, g);
     }
+  }
+
+  private drawMoodDetails(ctx: CanvasRenderingContext2D, g: ReturnType<DaFeiYuRenderer['computeGeom']>): void {
+    const pose = g.pose!;
+    ctx.save();
+    if (pose.yawn > 0.08) {
+      const mouth = g.spritePointToWorld(0.50, 0.572);
+      ctx.fillStyle = '#684151';
+      ctx.beginPath();
+      ctx.ellipse(mouth.x, mouth.y, 3 + pose.yawn * 4.5, 2 + pose.yawn * 5, g.tilt, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    if (pose.sleeping) {
+      const anchor = g.spritePointToWorld(0.76, 0.28);
+      for (let i = 0; i < 2; i++) {
+        const drift = ((pose.ms + i * 900) % 1800) / 1800;
+        ctx.globalAlpha = Math.sin(drift * Math.PI) * 0.6;
+        ctx.fillStyle = '#7cd8ff';
+        ctx.font = '700 ' + (13 + i * 5) + 'px system-ui, sans-serif';
+        ctx.fillText('z', anchor.x + 7 + i * 13 + drift * 12, anchor.y - i * 6 - drift * 23);
+      }
+    } else if (pose.eyesWide) {
+      const anchor = g.spritePointToWorld(0.77, 0.29);
+      ctx.globalAlpha = 1 - pose.ms / 280;
+      ctx.strokeStyle = '#bcecff';
+      ctx.lineWidth = 2.8;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(anchor.x + 4, anchor.y - 5);
+      ctx.lineTo(anchor.x + 10, anchor.y - 15);
+      ctx.moveTo(anchor.x + 12, anchor.y);
+      ctx.lineTo(anchor.x + 22, anchor.y - 5);
+      ctx.stroke();
+    }
+    ctx.restore();
   }
 
   /** Layer 2 (drawn AFTER keyboard & mouse): water ripples, animated whale tail, plump round hands, particles. */
@@ -868,7 +960,7 @@ export class DaFeiYuRenderer {
     const shR = g.spritePointToWorld(0.61, 0.653);
     const holding = !layout.privacyMode && (this.feedingPhase === 'walk' || this.feedingPhase === 'eat');
     this.bowlAmount += ((holding ? 1 : 0) - this.bowlAmount) * (1 - Math.exp(-15 * dt));
-    const showBowl = !layout.privacyMode && this.bowlAmount > 0.025;
+    const showBowl = !layout.privacyMode && !g.pose && this.bowlAmount > 0.025;
     const bite = this.biteAt(now);
     const bowl = g.spritePointToWorld(0.52, 0.712 - 0.022 * bite);
     const mouth = g.spritePointToWorld(0.499, 0.55);
@@ -897,7 +989,7 @@ export class DaFeiYuRenderer {
 
     // 2) Only draw the arching front half & fluke of the whale tail in foreground while slapping a key,
     // keeping the waist root strictly behind her body & keyboard bezel!
-    if (this.tail.phase > 0.12) {
+    if (!g.pose && this.tail.phase > 0.12) {
       const tipX = tailRoot.x + this.tail.relX;
       const tipY = tailRoot.y + this.tail.relY;
       this.drawWhaleTail(
@@ -934,6 +1026,13 @@ export class DaFeiYuRenderer {
       lTargetY = eyeL.y + shyBob;
       rTargetX = eyeR.x;
       rTargetY = eyeR.y - shyBob;
+    } else if (g.pose) {
+      const left = g.spritePointToWorld(...g.pose.left);
+      const right = g.spritePointToWorld(...g.pose.right);
+      lTargetX = left.x;
+      lTargetY = left.y;
+      rTargetX = right.x;
+      rTargetY = right.y;
     } else if (showBowl) {
       lTargetX = bowl.x - 27 + bite * (mouth.x - bowl.x + 12);
       lTargetY = bowl.y + 7 + bite * (mouth.y - bowl.y + 13);
@@ -985,7 +1084,7 @@ export class DaFeiYuRenderer {
       this.leftHand.y,
       'left',
       this.leftHand.squash,
-      mouseMode ? maxMouseReach : 72,
+      g.pose ? 108 : mouseMode ? maxMouseReach : 72,
     );
     this.drawChubbyArm(
       ctx,
@@ -995,7 +1094,7 @@ export class DaFeiYuRenderer {
       this.rightHand.y,
       'right',
       this.rightHand.squash,
-      mouseMode ? 86 : 72,
+      g.pose ? 108 : mouseMode ? 86 : 72,
     );
 
     if (showBowl) {
