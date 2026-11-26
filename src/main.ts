@@ -1,5 +1,6 @@
 import './aiBubble';
 import './feedingEffect';
+import './mood.css';
 import type { FeedingPhase } from './dafeiyuRenderer';
 import './style.css';
 import { invoke } from '@tauri-apps/api/core';
@@ -952,6 +953,24 @@ async function bootstrap(): Promise<void> {
       catList = ev.payload;
       syncMenuUI();
     }
+  });
+
+  let moodExpressionTimer: number | undefined;
+  await listen<'bored' | 'low'>('kuro-mood-expression', ({ payload }) => {
+    const expression = document.getElementById('mood-expression') ?? document.createElement('div');
+    expression.id = 'mood-expression';
+    expression.textContent = payload === 'low' ? '😿 心情差' : '😴 好无聊';
+    expression.hidden = false;
+    if (!expression.isConnected) document.body.append(expression);
+    window.clearTimeout(moodExpressionTimer);
+    moodExpressionTimer = window.setTimeout(() => { expression.hidden = true; }, 2400);
+  });
+
+  await listen<'walk' | 'hop' | 'tug' | 'land' | 'stop'>('kuro-mood-motion', ({ payload }) => {
+    document.body.dataset.moodMotion = '';
+    if (payload === 'tug' || payload === 'land') void document.body.offsetWidth;
+    document.body.dataset.moodMotion = payload;
+    engine.setFeedingPhase(payload === 'walk' || payload === 'hop' ? 'walk' : 'stop');
   });
 
   await listen<{ phase: FeedingPhase }>('kuro-feeding-effect', ({ payload }) => {

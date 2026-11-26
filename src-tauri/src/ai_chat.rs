@@ -534,6 +534,8 @@ pub async fn send_ai_message(
         append_reply(&mut next, reply);
         persist(&next)?;
         chat.saved = next;
+        drop(chat);
+        crate::mood::interact(&app, crate::mood::Interaction::Chat);
         Ok(())
     })
     .await
@@ -574,7 +576,7 @@ pub(crate) fn fullscreen_foreground() -> bool {
     }
 }
 
-fn can_interrupt(app: &tauri::AppHandle, from_panel: bool) -> bool {
+pub(crate) fn can_interrupt(app: &tauri::AppHandle, from_panel: bool) -> bool {
     let state = app.state::<crate::AppState>();
     let settings = state.settings.lock().unwrap();
     let blocked = settings.click_through_locked || settings.obs_enabled && settings.obs_hide_pet;

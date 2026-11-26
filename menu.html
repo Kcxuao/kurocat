@@ -22,6 +22,9 @@
         <button class="menu-tab-btn" id="shortcut-tab" data-tab="shortcuts" type="button" role="tab" aria-selected="false" hidden>
           快捷启动
         </button>
+        <button class="menu-tab-btn" id="mood-tab" data-tab="mood" type="button" role="tab" aria-controls="mood-tab-panel" aria-selected="false" hidden>
+          心情
+        </button>
       </div>
 
       <div class="tab-body" id="menu-tab-body">
@@ -179,6 +182,33 @@
           </button>
         </div>
         <div class="tab-panel hidden" id="shortcut-tab-panel" data-tab-panel="shortcuts"></div>
+
+        <div class="tab-panel hidden" id="mood-tab-panel" data-tab-panel="mood" role="tabpanel" aria-labelledby="mood-tab">
+          <div class="menu-scale-row">
+            <div class="mood-score-heading">
+              <span id="mood-status" class="menu-scale-label">心情</span>
+              <span id="mood-score-label" class="menu-hint"></span>
+            </div>
+            <meter id="mood-score" aria-label="心情值" min="0" max="100"></meter>
+          </div>
+
+          <div class="menu-sep"></div>
+
+          <button id="mood-pranks" class="menu-item mood-menu-action" type="button" role="switch" aria-checked="false" disabled>
+            <span>允许恶作剧</span><span id="mood-pranks-check" class="menu-check" aria-hidden="true"></span>
+          </button>
+          <button id="mood-quiet" class="menu-item mood-menu-action" type="button">
+            <span id="mood-quiet-label">暂时安静 1 小时</span>
+          </button>
+
+          <div class="menu-sep"></div>
+
+          <div class="menu-scale-row"><span class="menu-scale-label">试玩恶作剧</span></div>
+          <button class="menu-item mood-menu-action" data-mood-preview="shake" type="button"><span>抖窗口</span><span class="mood-action-arrow" aria-hidden="true">›</span></button>
+          <button class="menu-item mood-menu-action" data-mood-preview="tug" type="button"><span>拽窗口</span><span class="mood-action-arrow" aria-hidden="true">›</span></button>
+          <button class="menu-item mood-menu-action" data-mood-preview="seesaw" type="button"><span>踩跷跷板</span><span class="mood-action-arrow" aria-hidden="true">›</span></button>
+          <p id="mood-menu-error" role="status"></p>
+        </div>
       </div>
 
       <button class="footer-btn" id="btn-feeding-menu" type="button" hidden>文件投喂区</button>

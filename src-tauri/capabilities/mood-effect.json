@@ -1,0 +1,10 @@
+{
+  "identifier": "mood-effect",
+  "description": "KuroCat mood overlay events",
+  "windows": [
+    "mood-effect"
+  ],
+  "permissions": [
+    "core:event:default"
+  ]
+}

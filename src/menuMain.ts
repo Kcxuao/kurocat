@@ -1,4 +1,5 @@
 import './style.css';
+import './moodMenu';
 import { setupShortcutManager } from './shortcutManager';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -50,7 +51,7 @@ interface UpdateProgressEvent {
   info?: UpdateInfo | null;
 }
 
-type MenuTabId = 'appearance' | 'system' | 'shortcuts';
+type MenuTabId = 'appearance' | 'system' | 'shortcuts' | 'mood';
 
 const isMacPlatform = (): boolean =>
   /Mac/i.test(navigator.platform) || /Macintosh/i.test(navigator.userAgent);
@@ -474,7 +475,7 @@ async function bootstrap(): Promise<void> {
     const tabBtn = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-tab]');
     if (tabBtn) {
       const t = tabBtn.dataset.tab;
-      if (t === 'appearance' || t === 'system' || t === 'shortcuts') {
+      if (t === 'appearance' || t === 'system' || t === 'shortcuts' || t === 'mood') {
         switchTab(t);
       }
       return;

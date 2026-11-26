@@ -4,6 +4,8 @@
 mod ai_chat;
 #[cfg(windows)]
 mod feeding;
+#[cfg(windows)]
+mod mood;
 
 #[cfg(windows)]
 mod shortcuts;
@@ -1879,11 +1881,15 @@ fn start_hit_test_loop(
             // aren't misled by squinting eyes when the cat is intentionally click-through.
             let over_cat = if effective_locked { false } else { raw_over_cat };
             #[cfg(windows)]
+            mood::pet_hover(&app, (cx, cy), over_cat && !is_drag && !is_menu
+                && picker_bounds.is_none() && !feeding::is_walking(&app));
+            #[cfg(windows)]
             shortcuts::tick(&app, Some((cx,cy)), Some(shortcuts::Rect {
                 x: win_x as f64 + pet_x0*w + bw*cur_scale*sf*0.20,
                 y: win_y as f64 + pet_y0*h + bh*cur_scale*sf*0.22,
                 w: bw*cur_scale*sf*0.60, h: bh*cur_scale*sf*0.60,
-            }), over_cat, !effective_locked && !is_drag && !is_menu && picker_bounds.is_none());
+            }), over_cat, !effective_locked && !is_drag && !is_menu && picker_bounds.is_none()
+                && !mood::is_moving());
 
             #[cfg(windows)]
             if is_win7_ulw {
@@ -2317,7 +2323,7 @@ pub fn run() {
 
     let builder = tauri::Builder::default();
     #[cfg(windows)]
-    let builder = builder.manage(shortcuts::State::default()).manage(ai_chat::State::default()).manage(feeding::State::default());
+    let builder = builder.manage(shortcuts::State::default()).manage(ai_chat::State::default()).manage(feeding::State::default()).manage(mood::State::default());
     builder
         .manage(AppState {
             settings: settings_arc,
@@ -2425,6 +2431,7 @@ pub fn run() {
             ai_chat::start(handle.clone());
             #[cfg(windows)]
             feeding::start(handle.clone());
+            mood::start(handle.clone());
             input_hook::start_global_hooks(handle.clone());
             privacy::start_password_privacy_watcher(
                 handle.clone(),
@@ -2521,6 +2528,18 @@ pub fn run() {
             feeding::try_feeding,
             #[cfg(windows)]
             feeding::set_glutton_mode,
+            #[cfg(windows)]
+            mood::get_mood,
+            #[cfg(windows)]
+            mood::set_mood_quiet,
+            #[cfg(windows)]
+            mood::preview_mood_prank,
+            #[cfg(windows)]
+            mood::set_mood_pranks,
+            #[cfg(windows)]
+            mood::get_mood_effect,
+            #[cfg(windows)]
+            mood::mood_effect_ready,
             #[cfg(windows)]
             feeding::make_pet_hungry,
             #[cfg(windows)]

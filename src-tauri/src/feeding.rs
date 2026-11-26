@@ -380,18 +380,18 @@ pub fn try_feeding(window: WebviewWindow, app: AppHandle) -> Result<(), String> 
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-struct Point {
-    x: i32,
-    y: i32,
+pub(crate) struct Point {
+    pub(crate) x: i32,
+    pub(crate) y: i32,
 }
 impl Point {
-    fn of(p: PhysicalPosition<i32>) -> Self {
+    pub(crate) fn of(p: PhysicalPosition<i32>) -> Self {
         Self { x: p.x, y: p.y }
     }
-    fn position(self) -> PhysicalPosition<i32> {
+    pub(crate) fn position(self) -> PhysicalPosition<i32> {
         PhysicalPosition::new(self.x, self.y)
     }
-    fn near(self, other: Self) -> bool {
+    pub(crate) fn near(self, other: Self) -> bool {
         self.x.abs_diff(other.x) <= 4 && self.y.abs_diff(other.y) <= 4
     }
 }
@@ -433,13 +433,13 @@ fn approach(
     }
 }
 
-fn walk_duration(from: Point, to: Point, scale: f64) -> u64 {
+pub(crate) fn walk_duration(from: Point, to: Point, scale: f64) -> u64 {
     let pixels = f64::from(from.x.abs_diff(to.x)).hypot(f64::from(from.y.abs_diff(to.y)));
     let duration = (1000. * pixels / (WALK_SPEED * scale)).ceil() as u64;
     duration.max(MIN_WALK_MS)
 }
 
-fn walk(from: Point, to: Point, elapsed: u64, duration: u64) -> Point {
+pub(crate) fn walk(from: Point, to: Point, elapsed: u64, duration: u64) -> Point {
     let t = (elapsed as f64 / duration as f64).clamp(0., 1.);
     let t = t * t * (3. - 2. * t);
     let axis = |a: i32, b: i32| (f64::from(a) + (f64::from(b) - f64::from(a)) * t).round() as i32;
@@ -465,7 +465,9 @@ impl Meal {
     fn eat(&self, app: &AppHandle, expected: Point) -> Result<bool, String> {
         match self {
             Self::Snack(name) => {
-                desktop::eat(name)?;
+                if desktop::eat(name)? {
+                    crate::mood::interact(app, crate::mood::Interaction::Feed);
+                }
                 forget_link(app, name);
                 Ok(true)
             }
@@ -548,6 +550,7 @@ fn eligible(app: &AppHandle, main: &WebviewWindow) -> bool {
         settings.click_through_locked || (settings.obs_enabled && settings.obs_hide_pet)
     };
     !locked
+        && !crate::mood::is_moving()
         && !app.state::<State>().recycling.load(Ordering::Acquire)
         && !state.dragging.load(Ordering::Relaxed)
         && !state.paused_guard.load(Ordering::Relaxed)
@@ -782,6 +785,9 @@ pub fn start(app: AppHandle) {
                     tray.hungry_at = Instant::now() + hunger(true);
                     active.consumed = true;
                     drop(tray);
+                    if active.desktop_item.is_none() {
+                        crate::mood::interact(&app, crate::mood::Interaction::Feed);
+                    }
                     changed(&app);
                 }
                 if elapsed >= EAT_MS {
