@@ -14,8 +14,9 @@ use windows::{
         },
         UI::Shell::{
             FileOperation, IFileOperation, IFileOperationProgressSink, IShellItem,
-            SHCreateItemFromParsingName, SHQueryRecycleBinW, FOFX_ADDUNDORECORD, FOFX_EARLYFAILURE,
-            FOFX_RECYCLEONDELETE, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_SILENT, SHQUERYRBINFO,
+            SHCreateItemFromParsingName, SHQueryRecycleBinW, FILEOPERATION_FLAGS,
+            FOFX_ADDUNDORECORD, FOFX_EARLYFAILURE, FOFX_RECYCLEONDELETE, FOF_NOCONFIRMATION,
+            FOF_NOERRORUI, FOF_NO_CONNECTED_ELEMENTS, FOF_SILENT, SHQUERYRBINFO,
         },
     },
 };
@@ -69,6 +70,18 @@ impl Drop for Com {
 }
 
 pub(super) fn recycle(owner: isize, path: &Path) -> Result<(), String> {
+    recycle_with_flags(owner, path, FILEOPERATION_FLAGS(0))
+}
+
+pub(super) fn recycle_desktop_file(path: &Path) -> Result<(), String> {
+    recycle_with_flags(0, path, FOF_NO_CONNECTED_ELEMENTS)
+}
+
+fn recycle_with_flags(
+    owner: isize,
+    path: &Path,
+    extra_flags: FILEOPERATION_FLAGS,
+) -> Result<(), String> {
     validate(path)?;
     unsafe {
         let _com = Com::new()?;
@@ -83,6 +96,7 @@ pub(super) fn recycle(owner: isize, path: &Path) -> Result<(), String> {
                 FOFX_RECYCLEONDELETE
                     | FOFX_ADDUNDORECORD
                     | FOFX_EARLYFAILURE
+                    | extra_flags
                     | FOF_NOCONFIRMATION
                     | FOF_SILENT
                     | FOF_NOERRORUI,

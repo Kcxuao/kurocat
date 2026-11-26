@@ -16,3 +16,12 @@ li > span:last-child { overflow:hidden; text-overflow:ellipsis; white-space:nowr
 
 .feeding-controls { display:flex; align-items:center; gap:8px; }
 .feeding-controls button { flex:none; }
+
+.glutton-switch { display:flex; align-items:center; gap:6px; }
+.glutton-switch input { margin:0; accent-color:#c7ef83; }
+#glutton-warning { width:calc(100% - 32px); border:1px solid #798864; border-radius:10px; background:#252d25; color:inherit; }
+#glutton-warning::backdrop { background:#000a; }
+#glutton-warning h2 { margin:0 0 8px; font-size:16px; }
+#glutton-warning footer { display:flex; justify-content:flex-end; gap:8px; margin-top:14px; }
+#glutton-warning button[value="cancel"] { background:#3c483a; color:inherit; }
+#confirm-glutton { background:#f0c285; }

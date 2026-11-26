@@ -12,7 +12,22 @@
     <ol id="snacks" aria-label="排队等待的食物"></ol>
     <div class="feeding-controls"><button id="make-hungry" type="button">现在饿了</button><p id="status" role="status"></p></div>
     <p class="hint">这里投喂会保留原文件。直接拖到桌宠身上，会将原文件移入回收站。</p>
+    <label class="glutton-switch">
+      <input id="glutton" type="checkbox" aria-describedby="glutton-hint" disabled>
+      暴食模式
+    </label>
+    <p id="glutton-hint" class="hint">开启后，桌宠饿了会随机回收一个桌面文件。</p>
   </main>
+  <dialog id="glutton-warning" aria-labelledby="glutton-title" aria-describedby="glutton-risk">
+    <form method="dialog">
+      <h2 id="glutton-title">开启暴食模式？</h2>
+      <p id="glutton-risk">桌宠每次饥饿时会随机将当前用户桌面的一个普通文件移入 Windows 回收站，无需逐次确认，重要文件也可能被选中。重启桌宠后此模式会关闭。</p>
+      <footer>
+        <button value="cancel" autofocus>取消</button>
+        <button value="enable" id="confirm-glutton">了解风险并开启</button>
+      </footer>
+    </form>
+  </dialog>
   <script type="module" src="/src/feeding.ts"></script>
 </body>
 </html>

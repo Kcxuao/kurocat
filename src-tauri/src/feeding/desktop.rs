@@ -1,8 +1,13 @@
 use super::{recycle, Point};
 use std::{
+    collections::hash_map::RandomState,
     ffi::{OsStr, OsString},
     fs,
-    os::windows::ffi::{OsStrExt, OsStringExt},
+    hash::BuildHasher,
+    os::windows::{
+        ffi::{OsStrExt, OsStringExt},
+        fs::MetadataExt,
+    },
     path::{Path, PathBuf},
     ptr::null_mut,
     sync::atomic::{AtomicU32, Ordering},
@@ -17,9 +22,10 @@ use windows::{
             STGM_READ,
         },
         UI::Shell::{
-            FOLDERID_Desktop, IFolderView, IFolderView2, IShellBrowser, IShellFolder, IShellLinkW,
-            IShellWindows, SHChangeNotify, SHGetKnownFolderPath, SID_STopLevelBrowser, ShellLink,
-            ShellWindows, FWF_NOICONS, KF_FLAG_DEFAULT, SHCNE_CREATE, SHCNF_PATHW, SWC_DESKTOP,
+            FOLDERID_Desktop, IFolderView, IFolderView2, IShellBrowser, IShellFolder, IShellItem,
+            IShellLinkW, IShellWindows, SHChangeNotify, SHCreateItemWithParent,
+            SHGetKnownFolderPath, SID_STopLevelBrowser, ShellLink, ShellWindows, FWF_NOICONS,
+            KF_FLAG_DEFAULT, SHCNE_CREATE, SHCNF_PATHW, SIGDN_FILESYSPATH, SWC_DESKTOP,
             SWFO_NEEDDISPATCH,
         },
     },
@@ -155,6 +161,74 @@ pub(super) fn eat(name: &str) -> Result<bool, String> {
     Ok(true)
 }
 
+fn desktop_meal(path: &Path) -> Option<fs::Metadata> {
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_ATTRIBUTE_HIDDEN, FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_SYSTEM,
+    };
+
+    let shortcut = path
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("lnk") || ext.eq_ignore_ascii_case("url"));
+    if shortcut {
+        return None;
+    }
+    fs::symlink_metadata(path).ok().filter(|meta| {
+        meta.is_file()
+            && meta.file_attributes()
+                & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM | FILE_ATTRIBUTE_REPARSE_POINT)
+                == 0
+    })
+}
+
+pub(super) struct DesktopFile {
+    pub(super) path: PathBuf,
+    metadata: fs::Metadata,
+}
+
+impl DesktopFile {
+    fn still_matches(&self) -> bool {
+        desktop_meal(&self.path).is_some_and(|current| {
+            current.creation_time() == self.metadata.creation_time()
+                && current.last_write_time() == self.metadata.last_write_time()
+                && current.file_size() == self.metadata.file_size()
+        })
+    }
+
+    pub(super) fn position(&self) -> Result<Location, String> {
+        let _com = recycle::Com::new()?;
+        match self.path.file_name() {
+            Some(name) if self.still_matches() => icon_position(name, Some(&self.path)),
+            _ => Ok(Location::Gone),
+        }
+    }
+
+    pub(super) fn eat(&self, expected: Point) -> Result<bool, String> {
+        if !matches!(self.position()?, Location::Found(point) if point.near(expected))
+            || !self.still_matches()
+        {
+            return Ok(false);
+        }
+        recycle::recycle_desktop_file(&self.path)?;
+        Ok(true)
+    }
+}
+
+pub(super) fn random_files() -> Result<Vec<DesktopFile>, String> {
+    let folder = desktop().map_err(|e| format!("无法找到 Windows 桌面：{e}"))?;
+    let mut files: Vec<_> = fs::read_dir(folder)
+        .map_err(|e| e.to_string())?
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let path = entry.path();
+            let metadata = desktop_meal(&path)?;
+            Some(DesktopFile { path, metadata })
+        })
+        .collect();
+    let random = RandomState::new();
+    files.sort_by_cached_key(|file| random.hash_one(&file.path));
+    Ok(files)
+}
+
 pub(super) enum Location {
     Found(Point),
     Gone,
@@ -165,6 +239,10 @@ pub(super) fn position(name: &str) -> Result<Location, String> {
     if tracked_path(name)?.is_none() {
         return Ok(Location::Gone);
     }
+    icon_position(OsStr::new(name), None)
+}
+
+fn icon_position(name: &OsStr, expected_path: Option<&Path>) -> Result<Location, String> {
     let result = unsafe {
         (|| -> windows::core::Result<Option<Point>> {
             let shell: IShellWindows = CoCreateInstance(
@@ -208,9 +286,22 @@ pub(super) fn position(name: &str) -> Result<Location, String> {
                 &mut pidl,
                 &mut attrs,
             )?;
-            let point = folder_view.GetItemPosition(pidl);
+            let point = (|| -> windows::core::Result<Option<_>> {
+                if let Some(expected) = expected_path {
+                    let item: IShellItem = SHCreateItemWithParent(None, &folder, pidl)?;
+                    let display = item.GetDisplayName(SIGDN_FILESYSPATH)?;
+                    let actual = PathBuf::from(OsString::from_wide(display.as_wide()));
+                    CoTaskMemFree(Some(display.0.cast()));
+                    if actual != expected {
+                        return Ok(None);
+                    }
+                }
+                folder_view.GetItemPosition(pidl).map(Some)
+            })();
             CoTaskMemFree(Some(pidl.cast()));
-            let point = point?;
+            let Some(point) = point? else {
+                return Ok(None);
+            };
             let mut screen = windows_sys::Win32::Foundation::POINT {
                 x: point.x,
                 y: point.y,
@@ -234,6 +325,80 @@ pub(super) fn position(name: &str) -> Result<Location, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn desktop_meals_exclude_shortcuts_and_directories() {
+        let folder =
+            std::env::temp_dir().join(format!("kurocat-glutton-test-{}", std::process::id()));
+        fs::create_dir(&folder).unwrap();
+        let file = folder.join("meal.txt");
+        let link = folder.join("shortcut.LNK");
+        let url = folder.join("website.url");
+        for path in [&file, &link, &url] {
+            fs::write(path, b"sample").unwrap();
+        }
+        let metadata = desktop_meal(&file).unwrap();
+        assert!(desktop_meal(&link).is_none());
+        assert!(desktop_meal(&url).is_none());
+        assert!(desktop_meal(&folder).is_none());
+        let meal = DesktopFile {
+            path: file.clone(),
+            metadata,
+        };
+        assert!(meal.still_matches());
+        fs::write(&file, b"replaced contents").unwrap();
+        assert!(!meal.still_matches());
+        for path in [&file, &link, &url] {
+            fs::remove_file(path).unwrap();
+        }
+        fs::remove_dir(folder).unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires an interactive Windows desktop and a disposable test file"]
+    fn finds_regular_file_icon_on_windows_desktop() {
+        let path = desktop()
+            .unwrap()
+            .join(format!("KuroCat glutton test {}.txt", std::process::id()));
+        drop(
+            fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&path)
+                .unwrap(),
+        );
+        let file = DesktopFile {
+            metadata: desktop_meal(&path).unwrap(),
+            path,
+        };
+        struct Cleanup<'a>(&'a DesktopFile);
+        impl Drop for Cleanup<'_> {
+            fn drop(&mut self) {
+                if self.0.still_matches() {
+                    let _ = fs::remove_file(&self.0.path);
+                }
+            }
+        }
+        let _cleanup = Cleanup(&file);
+        let full_path = wide(&file.path);
+        unsafe {
+            SHChangeNotify(
+                SHCNE_CREATE,
+                SHCNF_PATHW,
+                Some(full_path.as_ptr().cast()),
+                None,
+            )
+        };
+        for _ in 0..25 {
+            match file.position() {
+                Ok(Location::Found(_)) => return,
+                Ok(_) => {}
+                Err(error) => eprintln!("{error}"),
+            }
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+        panic!("Explorer did not report the disposable desktop file's icon position");
+    }
 
     #[test]
     #[ignore = "requires an interactive Windows desktop and temporarily creates its own test shortcut"]

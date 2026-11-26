@@ -18,7 +18,9 @@ mod recycle;
 
 const LABEL: &str = "feeding";
 const LIMIT: usize = 12;
-const WALK_MS: u64 = 1250;
+const WALK_SPEED: f64 = 360.;
+const MIN_WALK_MS: u64 = 450;
+const MAX_WALK_FRAME_MS: u64 = 40;
 const EAT_MS: u64 = 1200;
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -69,6 +71,7 @@ pub struct State {
     walking: AtomicBool,
     opening: AtomicBool,
     recycling: AtomicBool,
+    glutton: Mutex<bool>,
 }
 
 impl Default for State {
@@ -100,6 +103,7 @@ impl Default for State {
             walking: AtomicBool::new(false),
             opening: AtomicBool::new(false),
             recycling: AtomicBool::new(false),
+            glutton: Mutex::new(false),
         }
     }
 }
@@ -272,7 +276,7 @@ pub async fn open_feeding(window: WebviewWindow, app: AppHandle) -> Result<(), S
                 tauri::WebviewUrl::App("feeding.html".into()),
             )
             .title("KuroCat · 文件投喂区")
-            .inner_size(310., 330.)
+            .inner_size(310., 385.)
             .resizable(false)
             .maximizable(false)
             .minimizable(false)
@@ -292,7 +296,7 @@ pub async fn open_feeding(window: WebviewWindow, app: AppHandle) -> Result<(), S
                 let size = tray
                     .outer_size()
                     .map(|s| (s.width as i32, s.height as i32))
-                    .unwrap_or(((310. * dpi).round() as i32, (360. * dpi).round() as i32));
+                    .unwrap_or(((310. * dpi).round() as i32, (415. * dpi).round() as i32));
                 let (x, y) = crate::compute_side_menu_pos(pet, work, size, (160. * dpi) as i32, 12);
                 let _ = tray.set_position(PhysicalPosition::new(x, y));
             }
@@ -319,10 +323,24 @@ pub fn get_feeding(window: WebviewWindow, app: AppHandle) -> Result<serde_json::
     only_tray(&window)?;
     let state = app.state::<State>();
     let tray = state.tray.lock().unwrap();
+    let glutton = *state.glutton.lock().unwrap();
     Ok(
         serde_json::json!({"snacks":tray.snacks, "busy":state.walking.load(Ordering::Relaxed),
-        "waiting":tray.request, "hungry":Instant::now() >= tray.hungry_at, "error":tray.error}),
+        "waiting":tray.request, "hungry":Instant::now() >= tray.hungry_at, "error":tray.error,
+        "glutton":glutton}),
     )
+}
+
+#[tauri::command]
+pub fn set_glutton_mode(
+    window: WebviewWindow,
+    app: AppHandle,
+    enabled: bool,
+) -> Result<(), String> {
+    only_tray(&window)?;
+    *app.state::<State>().glutton.lock().unwrap() = enabled;
+    changed(&app);
+    Ok(())
 }
 
 #[tauri::command]
@@ -331,7 +349,9 @@ pub fn make_pet_hungry(window: WebviewWindow, app: AppHandle) -> Result<(), Stri
     let state = app.state::<State>();
     let mut tray = state.tray.lock().unwrap();
     if let Some(error) = &tray.error {
-        return Err(error.clone());
+        if !*state.glutton.lock().unwrap() {
+            return Err(error.clone());
+        }
     }
     if state.walking.load(Ordering::Acquire) {
         return Err("等桌宠吃完这份零食再试。".into());
@@ -413,8 +433,14 @@ fn approach(
     }
 }
 
-fn walk(from: Point, to: Point, elapsed: u64) -> Point {
-    let t = (elapsed as f64 / WALK_MS as f64).clamp(0., 1.);
+fn walk_duration(from: Point, to: Point, scale: f64) -> u64 {
+    let pixels = f64::from(from.x.abs_diff(to.x)).hypot(f64::from(from.y.abs_diff(to.y)));
+    let duration = (1000. * pixels / (WALK_SPEED * scale)).ceil() as u64;
+    duration.max(MIN_WALK_MS)
+}
+
+fn walk(from: Point, to: Point, elapsed: u64, duration: u64) -> Point {
+    let t = (elapsed as f64 / duration as f64).clamp(0., 1.);
     let t = t * t * (3. - 2. * t);
     let axis = |a: i32, b: i32| (f64::from(a) + (f64::from(b) - f64::from(a)) * t).round() as i32;
     Point {
@@ -423,16 +449,88 @@ fn walk(from: Point, to: Point, elapsed: u64) -> Point {
     }
 }
 
+enum Meal {
+    Snack(String),
+    File(desktop::DesktopFile),
+}
+
+impl Meal {
+    fn position(&self) -> Result<desktop::Location, String> {
+        match self {
+            Self::Snack(name) => desktop::position(name),
+            Self::File(file) => file.position(),
+        }
+    }
+
+    fn eat(&self, app: &AppHandle, expected: Point) -> Result<bool, String> {
+        match self {
+            Self::Snack(name) => {
+                desktop::eat(name)?;
+                forget_link(app, name);
+                Ok(true)
+            }
+            Self::File(file) => {
+                let state = app.state::<State>();
+                // Keep the switch serialized with dispatching the Shell operation.
+                let enabled = state.glutton.lock().unwrap();
+                if !*enabled || state.recycling.swap(true, Ordering::AcqRel) {
+                    return Ok(false);
+                }
+                let result = file.eat(expected);
+                drop(enabled);
+                state.recycling.store(false, Ordering::Release);
+                result
+            }
+        }
+    }
+}
+
 struct Trip {
     origin: Point,
     target: Point,
     last: Point,
-    desktop_item: Option<(String, Point)>,
-    start: Instant,
-    eating: bool,
-    returning: bool,
+    desktop_item: Option<(Meal, Point)>,
+    phase: Phase,
+    walk_ms: u64,
     consumed: bool,
     kind: Kind,
+}
+
+enum Phase {
+    Outbound(WalkProgress),
+    Eating(Instant),
+    Returning(WalkProgress),
+}
+
+struct WalkProgress {
+    last_frame: Instant,
+    elapsed: u64,
+}
+
+impl WalkProgress {
+    fn new() -> Self {
+        Self {
+            last_frame: Instant::now(),
+            elapsed: 0,
+        }
+    }
+
+    fn advance(&mut self, now: Instant, duration: u64) -> u64 {
+        // Give a delayed window update time to catch up without skipping the walk.
+        let frame = now
+            .duration_since(self.last_frame)
+            .as_millis()
+            .min(u128::from(MAX_WALK_FRAME_MS));
+        self.last_frame = now;
+        self.elapsed = (self.elapsed + frame as u64).min(duration);
+        self.elapsed
+    }
+}
+
+impl Trip {
+    fn eats_desktop_file(&self) -> bool {
+        matches!(&self.desktop_item, Some((Meal::File(_), _)))
+    }
 }
 
 fn pet_effect(app: &AppHandle, phase: &str, kind: Kind) {
@@ -465,7 +563,7 @@ fn eligible(app: &AppHandle, main: &WebviewWindow) -> bool {
         && main.is_visible().unwrap_or(false)
 }
 
-fn begin_trip(main: &WebviewWindow, icon: Point, snack: &Snack) -> Option<Trip> {
+fn begin_trip(main: &WebviewWindow, icon: Point, meal: Meal, kind: Kind) -> Option<Trip> {
     let origin = Point::of(main.outer_position().ok()?);
     let pet_size = main.outer_size().ok()?;
     let monitor = main.current_monitor().ok()??;
@@ -495,17 +593,29 @@ fn begin_trip(main: &WebviewWindow, icon: Point, snack: &Snack) -> Option<Trip> 
         origin,
         target,
         last: origin,
-        desktop_item: Some((snack.link.clone(), icon)),
-        start: Instant::now(),
-        eating: false,
-        returning: false,
+        desktop_item: Some((meal, icon)),
+        phase: Phase::Outbound(WalkProgress::new()),
+        walk_ms: walk_duration(origin, target, monitor.scale_factor()),
         consumed: false,
-        kind: snack.kind,
+        kind,
     })
 }
 
+fn begin_glutton_trip(main: &WebviewWindow) -> Result<Option<Trip>, String> {
+    for file in desktop::random_files()? {
+        let Ok(desktop::Location::Found(icon)) = file.position() else {
+            continue;
+        };
+        let kind = Kind::of(&file.path);
+        if let Some(trip) = begin_trip(main, icon, Meal::File(file), kind) {
+            return Ok(Some(trip));
+        }
+    }
+    Ok(None)
+}
+
 fn finish(app: &AppHandle, main: &WebviewWindow, trip: &Trip, restore: bool) {
-    if restore {
+    if restore && !(trip.consumed && trip.eats_desktop_file()) {
         let _ = main.set_position(trip.origin.position());
     }
     let state = app.state::<State>();
@@ -551,9 +661,8 @@ fn begin_hand_feed(main: &WebviewWindow, kind: Kind) -> Option<Trip> {
         target: origin,
         last: origin,
         desktop_item: None,
-        start: Instant::now() - Duration::from_millis(WALK_MS),
-        eating: true,
-        returning: false,
+        phase: Phase::Eating(Instant::now()),
+        walk_ms: 0,
         consumed: false,
         kind,
     })
@@ -598,7 +707,11 @@ pub fn start(app: AppHandle) {
                     .outer_position()
                     .ok()
                     .is_some_and(|p| Point::of(p).near(active.last));
-                let can_continue = !dragging
+                let glutton_cancelled = !active.consumed
+                    && active.eats_desktop_file()
+                    && !*state.glutton.lock().unwrap();
+                let can_continue = !glutton_cancelled
+                    && !dragging
                     && owns_position
                     && if active.desktop_item.is_some() {
                         eligible(&app, &main)
@@ -610,28 +723,57 @@ pub fn start(app: AppHandle) {
                     trip = None;
                     continue;
                 }
-                let elapsed = active.start.elapsed().as_millis() as u64;
-                if elapsed >= WALK_MS && !active.eating {
-                    if let Some((link, expected)) = &active.desktop_item {
-                        if !matches!(desktop::position(link), Ok(desktop::Location::Found(position)) if position.near(*expected))
-                        {
-                            finish(&app, &main, active, true);
+                let returning = matches!(active.phase, Phase::Returning(_));
+                let elapsed = match &mut active.phase {
+                    Phase::Outbound(progress) | Phase::Returning(progress) => {
+                        let (from, to) = if returning {
+                            (active.target, active.origin)
+                        } else {
+                            (active.origin, active.target)
+                        };
+                        let elapsed = progress.advance(Instant::now(), active.walk_ms);
+                        let next = walk(from, to, elapsed, active.walk_ms);
+                        if next != active.last {
+                            if main.set_position(next.position()).is_err() {
+                                finish(&app, &main, active, false);
+                                trip = None;
+                                continue;
+                            }
+                            active.last = next;
+                        }
+                        if elapsed < active.walk_ms {
+                            continue;
+                        }
+                        if returning {
+                            finish(&app, &main, active, false);
                             trip = None;
                             continue;
                         }
+                        if let Some((meal, expected)) = &active.desktop_item {
+                            let at_icon = matches!(meal.position(), Ok(desktop::Location::Found(position)) if position.near(*expected));
+                            if !at_icon {
+                                finish(&app, &main, active, true);
+                                trip = None;
+                                continue;
+                            }
+                        }
+                        active.phase = Phase::Eating(Instant::now());
+                        pet_effect(&app, "eat", active.kind);
+                        continue;
                     }
-                    active.eating = true;
-                    pet_effect(&app, "eat", active.kind);
-                }
-                if elapsed >= WALK_MS + EAT_MS / 2 && !active.consumed {
-                    if let Some((name, _)) = &active.desktop_item {
-                        if let Err(error) = desktop::eat(name) {
-                            notice(&app, error);
+                    Phase::Eating(start) => start.elapsed().as_millis() as u64,
+                };
+                if elapsed >= EAT_MS / 2 && !active.consumed {
+                    if let Some((meal, expected)) = &active.desktop_item {
+                        let result = meal.eat(&app, *expected);
+                        if !matches!(result, Ok(true)) {
+                            if let Err(error) = result {
+                                notice(&app, error);
+                            }
                             finish(&app, &main, active, true);
                             trip = None;
                             continue;
                         }
-                        forget_link(&app, name);
                     }
                     let mut tray = state.tray.lock().unwrap();
                     if active.desktop_item.is_none() {
@@ -642,31 +784,14 @@ pub fn start(app: AppHandle) {
                     drop(tray);
                     changed(&app);
                 }
-                if active.desktop_item.is_none() {
-                    if elapsed >= WALK_MS + EAT_MS {
+                if elapsed >= EAT_MS {
+                    if active.desktop_item.is_none() || active.eats_desktop_file() {
                         finish(&app, &main, active, false);
                         trip = None;
+                    } else {
+                        active.phase = Phase::Returning(WalkProgress::new());
+                        pet_effect(&app, "return", active.kind);
                     }
-                    continue;
-                }
-                if elapsed >= WALK_MS + EAT_MS && !active.returning {
-                    active.returning = true;
-                    pet_effect(&app, "return", active.kind);
-                }
-                if elapsed >= 2 * WALK_MS + EAT_MS {
-                    finish(&app, &main, active, true);
-                    trip = None;
-                    continue;
-                }
-                let next = if elapsed <= WALK_MS {
-                    walk(active.origin, active.target, elapsed)
-                } else if active.returning {
-                    walk(active.target, active.origin, elapsed - WALK_MS - EAT_MS)
-                } else {
-                    active.target
-                };
-                if next != active.last && main.set_position(next.position()).is_ok() {
-                    active.last = next;
                 }
                 continue;
             }
@@ -689,19 +814,44 @@ pub fn start(app: AppHandle) {
             if Instant::now() < retry_after {
                 continue;
             }
-            let snack = {
+            let (requested, snack) = {
                 let tray = state.tray.lock().unwrap();
-                if tray.error.is_some() || !tray.request && Instant::now() < tray.hungry_at {
+                if !tray.request && Instant::now() < tray.hungry_at {
                     continue;
                 }
-                tray.snacks.front().cloned()
+                let snack = if tray.error.is_none() {
+                    tray.snacks.front().cloned()
+                } else {
+                    None
+                };
+                (tray.request, snack)
             };
+            let glutton = !requested && *state.glutton.lock().unwrap();
+            if (glutton || snack.is_some()) && !eligible(&app, &main) {
+                continue;
+            }
+            if glutton {
+                match begin_glutton_trip(&main) {
+                    Ok(Some(next)) => {
+                        state.walking.store(true, Ordering::Release);
+                        pet_effect(&app, "walk", next.kind);
+                        changed(&app);
+                        trip = Some(next);
+                    }
+                    Ok(None) => {
+                        notice(&app, "桌宠所在屏幕暂时没有可回收的桌面文件。".into());
+                        retry_after = Instant::now() + Duration::from_secs(15);
+                    }
+                    Err(error) => {
+                        notice(&app, format!("暴食模式无法查找桌面文件：{error}"));
+                        retry_after = Instant::now() + Duration::from_secs(15);
+                    }
+                }
+                continue;
+            }
             let Some(snack) = snack else {
                 continue;
             };
-            if !eligible(&app, &main) {
-                continue;
-            }
             let icon = match desktop::position(&snack.link) {
                 Ok(desktop::Location::Found(icon)) => icon,
                 Ok(desktop::Location::Gone) => {
@@ -719,7 +869,7 @@ pub fn start(app: AppHandle) {
                     continue;
                 }
             };
-            if let Some(next) = begin_trip(&main, icon, &snack) {
+            if let Some(next) = begin_trip(&main, icon, Meal::Snack(snack.link), snack.kind) {
                 state.walking.store(true, Ordering::Release);
                 state.tray.lock().unwrap().request = false;
                 pet_effect(&app, "walk", snack.kind);
@@ -749,10 +899,24 @@ mod tests {
             10,
         );
         assert_eq!(target.x, -530);
-        assert_eq!(walk(pet, target, 0), pet);
-        assert_ne!(walk(pet, target, 500), target);
-        assert_eq!(walk(pet, target, WALK_MS), target);
-        assert_eq!(walk(target, pet, WALK_MS), pet);
+        let duration = walk_duration(pet, target, 1.);
+        assert_eq!(walk(pet, target, 0, duration), pet);
+        assert_ne!(walk(pet, target, duration / 2, duration), target);
+        assert_eq!(walk(pet, target, duration, duration), target);
+        assert_eq!(walk(target, pet, duration, duration), pet);
+    }
+
+    #[test]
+    fn long_walk_does_not_skip_to_destination_after_a_slow_frame() {
+        let origin = Point { x: 0, y: 0 };
+        let target = Point { x: 1500, y: 0 };
+        let duration = walk_duration(origin, target, 1.);
+        assert!(duration >= 4000);
+        let mut progress = WalkProgress::new();
+        let delayed = progress.last_frame + Duration::from_secs(10);
+        let elapsed = progress.advance(delayed, duration);
+        assert_eq!(elapsed, MAX_WALK_FRAME_MS);
+        assert!(walk(origin, target, elapsed, duration).x < 25);
     }
 
     #[test]

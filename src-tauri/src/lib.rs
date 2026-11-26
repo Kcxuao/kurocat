@@ -2520,6 +2520,8 @@ pub fn run() {
             #[cfg(windows)]
             feeding::try_feeding,
             #[cfg(windows)]
+            feeding::set_glutton_mode,
+            #[cfg(windows)]
             feeding::make_pet_hungry,
             #[cfg(windows)]
             ai_chat::ai_bubble,
