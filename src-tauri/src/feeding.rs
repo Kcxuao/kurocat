@@ -71,6 +71,7 @@ pub struct State {
     walking: AtomicBool,
     opening: AtomicBool,
     recycling: AtomicBool,
+    file_hover: AtomicBool,
     glutton: Mutex<bool>,
 }
 
@@ -103,6 +104,7 @@ impl Default for State {
             walking: AtomicBool::new(false),
             opening: AtomicBool::new(false),
             recycling: AtomicBool::new(false),
+            file_hover: AtomicBool::new(false),
             glutton: Mutex::new(false),
         }
     }
@@ -637,6 +639,15 @@ pub(crate) fn is_walking(app: &AppHandle) -> bool {
         .is_some_and(|state| state.walking.load(Ordering::Acquire))
 }
 
+pub(crate) fn blocks_shortcut_hover(app: &AppHandle) -> bool {
+    app.try_state::<State>().is_some_and(|state| {
+        state.walking.load(Ordering::Acquire)
+            || state.file_hover.load(Ordering::Acquire)
+            || state.recycling.load(Ordering::Acquire)
+            || !state.tray.lock().unwrap().handfed.is_empty()
+    })
+}
+
 fn forget_link(app: &AppHandle, name: &str) {
     let state = app.state::<State>();
     let mut tray = state.tray.lock().unwrap();
@@ -679,13 +690,25 @@ pub fn start(app: AppHandle) {
         let handle = app.clone();
         main.on_window_event(move |event| match event {
             WindowEvent::DragDrop(DragDropEvent::Enter { paths, .. }) if !paths.is_empty() => {
+                handle
+                    .state::<State>()
+                    .file_hover
+                    .store(true, Ordering::Release);
                 let _ = handle.emit_to("main", "kuro-feeding-drop-hover", true);
             }
             WindowEvent::DragDrop(DragDropEvent::Drop { paths, .. }) => {
                 let _ = handle.emit_to("main", "kuro-feeding-drop-hover", false);
                 drop_on_pet(handle.clone(), paths.clone());
+                handle
+                    .state::<State>()
+                    .file_hover
+                    .store(false, Ordering::Release);
             }
             WindowEvent::DragDrop(DragDropEvent::Leave) => {
+                handle
+                    .state::<State>()
+                    .file_hover
+                    .store(false, Ordering::Release);
                 let _ = handle.emit_to("main", "kuro-feeding-drop-hover", false);
             }
             _ => {}

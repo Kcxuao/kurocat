@@ -871,7 +871,7 @@ async function bootstrap(): Promise<void> {
 
   btnToastOpenEl.addEventListener('click', (e) => {
     e.stopPropagation();
-    const url = latestUpdateInfo?.releaseUrl || 'https://github.com/qianyiai/kurocat/releases/latest';
+    const url = latestUpdateInfo?.releaseUrl || 'https://github.com/Kcxuao/kurocat/releases';
     void invoke('open_release_page', { url });
   });
 

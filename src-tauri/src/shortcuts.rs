@@ -117,8 +117,8 @@ fn path() -> PathBuf {
     crate::config::app_data_dir().join("shortcuts.json")
 }
 fn validate(items: &[Shortcut], old: &[Shortcut]) -> Result<(), String> {
-    if items.len() > 8 {
-        return Err("最多添加 8 个快捷入口".into());
+    if items.len() > MAX_SHORTCUTS {
+        return Err("最多添加 24 个快捷入口".into());
     }
     let mut ids = HashSet::new();
     for i in items {
@@ -403,6 +403,11 @@ struct Layout {
     h: f64,
     sf: f64,
     anchor: Point,
+    rotates: bool,
+    first: usize,
+    page: usize,
+    pages: usize,
+    pager: Option<Point>,
 }
 fn distance(a: Point, b: Point) -> f64 {
     (a.x - b.x).hypot(a.y - b.y)
@@ -419,130 +424,199 @@ fn segment_distance(p: Point, a: Point, b: Point) -> f64 {
         },
     )
 }
-fn layout(pet: Rect, work: Rect, sf: f64, n: usize) -> Layout {
+const SLOTS_PER_RING: usize = 8;
+const MAX_SHORTCUTS: usize = 24;
+const RING_PERIODS: [f64; 3] = [48_000., -72_000., 96_000.];
+
+// A partial ring is always innermost. Ranking and default hotkeys still use the original list order.
+fn inner_ring_padding(count: usize) -> usize {
+    count.next_multiple_of(SLOTS_PER_RING) - count
+}
+
+impl Layout {
+    fn positions(&self, motion_ms: u64) -> Vec<Point> {
+        if !self.rotates || motion_ms == 0 {
+            return self.buttons.clone();
+        }
+        self.buttons
+            .iter()
+            .enumerate()
+            .map(|(index, point)| {
+                let ring = (inner_ring_padding(self.buttons.len()) + index) / SLOTS_PER_RING;
+                let period = RING_PERIODS[ring];
+                let angle = std::f64::consts::TAU * (motion_ms as f64 % period.abs()) / period;
+                let (sin, cos) = angle.sin_cos();
+                let x = point.x - self.anchor.x;
+                let y = point.y - self.anchor.y;
+                Point {
+                    x: self.anchor.x + x * cos - y * sin,
+                    y: self.anchor.y + x * sin + y * cos,
+                }
+            })
+            .collect()
+    }
+}
+
+fn layout(pet: Rect, work: Rect, sf: f64, count: usize, requested_page: usize) -> Layout {
+    use std::f64::consts::{FRAC_PI_2, PI, TAU};
     let anchor = Point {
         x: pet.x + pet.w * 0.5,
         y: pet.y + pet.h * 0.5,
     };
     let r = 24. * sf;
     let pad = 8. * sf;
-    let left = anchor.x - work.x;
-    let right = work.x + work.w - anchor.x;
-    let top = anchor.y - work.y;
-    let bottom = work.y + work.h - anchor.y;
-    let nearest = [left, right, top, bottom]
-        .into_iter()
-        .enumerate()
-        .min_by(|a, b| a.1.total_cmp(&b.1))
-        .unwrap()
-        .0;
-    let inward = [
-        0.,
-        std::f64::consts::PI,
-        std::f64::consts::FRAC_PI_2,
-        -std::f64::consts::FRAC_PI_2,
-    ][nearest];
-    let quadrant = (
-        if left < right { 1.0_f64 } else { -1.0_f64 },
-        if top < bottom { 1.0_f64 } else { -1.0_f64 },
-    );
-    let mut selected = vec![];
-    for (span, mid) in [
-        (std::f64::consts::TAU, -std::f64::consts::FRAC_PI_2),
-        (std::f64::consts::PI, inward),
-        (std::f64::consts::FRAC_PI_2, quadrant.1.atan2(quadrant.0)),
-    ] {
-        let step = if span == std::f64::consts::TAU {
-            span / n.max(1) as f64
-        } else {
-            span / (n.saturating_sub(1)).max(1) as f64
-        };
-        let spacing = if n > 1 {
-            60. * sf / (2. * (step / 2.).sin())
-        } else {
-            0.
-        };
-        let radius = (pet.w * 0.5).hypot(pet.h * 0.5).max(spacing) + r + 12. * sf;
-        selected = (0..n)
-            .map(|i| {
-                let a = if span == std::f64::consts::TAU {
-                    mid + i as f64 * step
-                } else if n == 1 {
-                    mid
+    let gap = 60. * sf;
+    let inset = r + pad;
+    let clear = (pet.w * 0.5).hypot(pet.h * 0.5) + r + 12. * sf;
+    let fits = |p: Point| {
+        p.x >= work.x + inset
+            && p.y >= work.y + inset
+            && p.x <= work.x + work.w - inset
+            && p.y <= work.y + work.h - inset
+    };
+    let sides = [
+        anchor.x - work.x,
+        work.x + work.w - anchor.x,
+        anchor.y - work.y,
+        work.y + work.h - anchor.y,
+    ];
+    let near = (0..4)
+        .min_by(|i, j| sides[*i].total_cmp(&sides[*j]))
+        .unwrap();
+    let inward = [0., PI, FRAC_PI_2, -FRAC_PI_2][near];
+    let dx: f64 = if sides[0] < sides[1] { 1. } else { -1. };
+    let dy: f64 = if sides[2] < sides[3] { 1. } else { -1. };
+    let corner = dy.atan2(dx);
+    let rings = count.div_ceil(SLOTS_PER_RING);
+    let mut buttons = Vec::new();
+    let mut rotates = false;
+    let mut outer = 0.;
+    for (span, center) in [(TAU, -FRAC_PI_2), (PI, inward), (FRAC_PI_2 * 0.84, corner)] {
+        buttons.clear();
+        let full = span == TAU;
+        let mut radius = clear - gap;
+        for ring in 0..rings {
+            let slots = if ring == 0 {
+                SLOTS_PER_RING - inner_ring_padding(count)
+            } else {
+                SLOTS_PER_RING
+            };
+            let step = if full {
+                TAU / slots as f64
+            } else {
+                span / slots.saturating_sub(1).max(1) as f64
+            };
+            let spacing = if slots > 1 {
+                gap / (2. * (step / 2.).sin())
+            } else {
+                clear
+            };
+            radius = (radius + gap).max(spacing).max(clear);
+            for i in 0..slots {
+                let angle = if full {
+                    center
+                        + i as f64 * step
+                        + if ring % 2 == 1 {
+                            PI / SLOTS_PER_RING as f64
+                        } else {
+                            0.
+                        }
+                } else if slots == 1 {
+                    center
                 } else {
-                    mid - span / 2. + i as f64 * step
+                    center - span / 2. + i as f64 * step
                 };
-                Point {
-                    x: anchor.x + radius * a.cos(),
-                    y: anchor.y + radius * a.sin(),
-                }
-            })
-            .collect();
-        if selected.iter().all(|p| {
-            p.x - r >= work.x + pad
-                && p.y - r >= work.y + pad
-                && p.x + r <= work.x + work.w - pad
-                && p.y + r <= work.y + work.h - pad
-        }) {
+                buttons.push(Point {
+                    x: anchor.x + radius * angle.cos(),
+                    y: anchor.y + radius * angle.sin(),
+                });
+            }
+        }
+        let fits_orbit = radius + inset <= sides.into_iter().fold(f64::INFINITY, f64::min);
+        if (!full || fits_orbit) && buttons.iter().copied().all(fits) {
+            rotates = full;
+            outer = radius;
             break;
         }
+        buttons.clear();
     }
-    // Very small work areas use a compact grid only when no arc can fit after translation.
-    let bounds = |v: &Vec<Point>| {
-        let x = v
-            .iter()
-            .map(|p| p.x - r - pad)
-            .fold(f64::INFINITY, f64::min);
-        let y = v
-            .iter()
-            .map(|p| p.y - r - pad)
-            .fold(f64::INFINITY, f64::min);
-        let right = v
-            .iter()
-            .map(|p| p.x + r + pad)
-            .fold(f64::NEG_INFINITY, f64::max);
-        let bottom = v
-            .iter()
-            .map(|p| p.y + r + pad)
-            .fold(f64::NEG_INFINITY, f64::max);
-        (x, y, right - x, bottom - y)
-    };
-    let (mut x, mut y, mut w, mut h) = bounds(&selected);
-    if w > work.w || h > work.h {
-        let cols = ((work.w - 2. * pad) / (60. * sf)).floor().max(1.) as usize;
-        selected = (0..n)
-            .map(|i| Point {
-                x: work.x + pad + r + (i % cols) as f64 * 60. * sf,
-                y: work.y + pad + r + (i / cols) as f64 * 60. * sf,
-            })
-            .collect();
-        (x, y, w, h) = bounds(&selected);
-    }
-    let nx = x.clamp(work.x, (work.x + work.w - w).max(work.x));
-    let ny = y.clamp(work.y, (work.y + work.h - h).max(work.y));
-    for p in &mut selected {
-        p.x += nx - x;
-        p.y += ny - y;
+    let mut first = 0;
+    let mut page = 0;
+    let mut pages = 1;
+    let mut pager = None;
+    if buttons.is_empty() {
+        // When the concentric arcs won't fit, use a compact paged panel.
+        let columns = (((work.w - 2. * inset) / gap).floor() as usize + 1).clamp(1, 4);
+        let rows = (((work.h - 2. * inset) / gap).floor() as usize + 1).clamp(1, 3);
+        let slots = columns * rows;
+        let per_page = if count > slots {
+            slots.saturating_sub(1).max(1).min(8)
+        } else {
+            slots.min(8)
+        };
+        pages = count.div_ceil(per_page);
+        page = requested_page.min(pages - 1);
+        first = page * per_page;
+        let length = (count - first).min(per_page);
+        let rows_used = (length + usize::from(pages > 1)).div_ceil(columns);
+        let w = (columns - 1) as f64 * gap;
+        let h = (rows_used - 1) as f64 * gap;
+        let min_x = work.x + inset;
+        let min_y = work.y + inset;
+        let max_x = (work.x + work.w - inset - w).max(min_x);
+        let max_y = (work.y + work.h - inset - h).max(min_y);
+        let x = (if dx > 0. {
+            anchor.x + clear * 0.70
+        } else {
+            anchor.x - clear * 0.70 - w
+        })
+        .clamp(min_x, max_x);
+        let y = (anchor.y - h / 2.).clamp(min_y, max_y);
+        let cell = |i| Point {
+            x: x + (i % columns) as f64 * gap,
+            y: y + (i / columns) as f64 * gap,
+        };
+        buttons.extend((0..length).map(cell));
+        if pages > 1 {
+            pager = Some(cell(length));
+        }
     }
     let margin = 64. * sf;
-    let surface_x = (nx - margin).min(anchor.x - 90. * sf).max(work.x);
-    let surface_y = (ny - margin).min(anchor.y - 90. * sf).max(work.y);
-    let surface_right = (nx + w + margin)
-        .max(anchor.x + 90. * sf)
-        .min(work.x + work.w);
-    let surface_bottom = (ny + h + margin)
-        .max(anchor.y + 90. * sf)
-        .min(work.y + work.h);
+    let mut left = anchor.x - 90. * sf;
+    let mut right = anchor.x + 90. * sf;
+    let mut top = anchor.y - 90. * sf;
+    let mut bottom = anchor.y + 90. * sf;
+    if rotates {
+        let extent = outer + inset;
+        left = left.min(anchor.x - extent);
+        right = right.max(anchor.x + extent);
+        top = top.min(anchor.y - extent);
+        bottom = bottom.max(anchor.y + extent);
+    }
+    for point in buttons.iter().copied().chain(pager) {
+        left = left.min(point.x - r - margin);
+        right = right.max(point.x + r + margin);
+        top = top.min(point.y - r - margin);
+        bottom = bottom.max(point.y + r + margin);
+    }
+    let x = left.max(work.x);
+    let y = top.max(work.y);
     Layout {
-        buttons: selected,
-        x: surface_x,
-        y: surface_y,
-        w: (surface_right - surface_x).max(1.),
-        h: (surface_bottom - surface_y).max(1.),
+        buttons,
+        x,
+        y,
+        w: (right.min(work.x + work.w) - x).max(1.),
+        h: (bottom.min(work.y + work.h) - y).max(1.),
         sf,
         anchor,
+        rotates,
+        first,
+        page,
+        pages,
+        pager,
     }
 }
+
 #[derive(Default)]
 struct Timer {
     entered: Option<u64>,
@@ -592,6 +666,10 @@ struct Runtime {
     key: Option<(Rect, Rect, f64, usize)>,
     queued: bool,
     hide_at: Option<Instant>,
+    page: usize,
+    orbit_ready: bool,
+    orbit_ms: u64,
+    last_orbit_tick: u64,
 }
 impl Default for Runtime {
     fn default() -> Self {
@@ -605,6 +683,10 @@ impl Default for Runtime {
             key: None,
             queued: false,
             hide_at: None,
+            page: 0,
+            orbit_ready: false,
+            orbit_ms: 0,
+            last_orbit_tick: 0,
         }
     }
 }
@@ -620,6 +702,9 @@ pub fn close(app: &tauri::AppHandle) {
         rt.layout = None;
         rt.key = None;
         rt.hide_at = None;
+        rt.page = 0;
+        rt.orbit_ready = false;
+        rt.orbit_ms = 0;
         *s.preview_until.lock().unwrap() = None;
     }
     let _ = app.emit_to("shortcuts", "kuro-shortcuts-visibility", false);
@@ -641,6 +726,7 @@ pub fn tick(
         .lock()
         .unwrap()
         .is_some_and(|deadline| Instant::now() < deadline);
+    let over_pet = over;
     let over = over || preview;
     let count = state.store.lock().unwrap().config.items.len();
     let Some(main) = app.get_webview_window("main") else {
@@ -673,31 +759,51 @@ pub fn tick(
         x: cx as f64,
         y: cy as f64,
     };
+    let now = rt.epoch.elapsed().as_millis() as u64;
+    let was = rt.timer.open;
+    if !was && rt.page != 0 {
+        rt.page = 0;
+        rt.key = None;
+    }
     let layout_changed = rt.key != Some(key);
     if layout_changed && count > 0 {
-        rt.layout = Some(layout(pet, work, sf, count));
+        let next = layout(pet, work, sf, count, rt.page);
+        rt.page = next.page;
+        rt.layout = Some(next);
+        rt.orbit_ready = false;
+        rt.orbit_ms = 0;
         rt.key = Some(key);
     }
-    let keep = over
-        || pet.contains(pos)
+    let pager = rt.layout.as_ref().and_then(|l| l.pager);
+    let positions = rt
+        .layout
+        .as_ref()
+        .map(|l| l.positions(if was { rt.orbit_ms } else { 0 }))
+        .unwrap_or_default();
+    let pointer_in_menu = pet.contains(pos)
         || rt.layout.as_ref().is_some_and(|l| {
-            l.buttons
+            positions
                 .iter()
-                .any(|b| segment_distance(pos, l.anchor, *b) <= 36. * sf)
+                .copied()
+                .chain(pager)
+                .any(|b| segment_distance(pos, l.anchor, b) <= 36. * sf)
         });
     if preview && !rt.timer.open {
         rt.timer.armed = true;
     }
-    let was = rt.timer.open;
-    let now = rt.epoch.elapsed().as_millis() as u64;
-    let open = rt.timer.tick(now, eligible, over, keep);
+    let open = rt.timer.tick(now, eligible, over, over || pointer_in_menu);
     if !open {
+        rt.orbit_ready = false;
+        rt.orbit_ms = 0;
+        rt.last_orbit_tick = now;
         if was {
             let _ = app.emit_to("shortcuts", "kuro-shortcuts-visibility", false);
             if let Some(w) = app.get_webview_window("shortcuts") {
                 let _ = w.set_ignore_cursor_events(true);
                 if eligible {
-                    rt.hide_at = Some(Instant::now() + std::time::Duration::from_millis(730));
+                    rt.hide_at = Some(
+                        Instant::now() + std::time::Duration::from_millis(510 + count as u64 * 26),
+                    );
                 } else {
                     let _ = w.hide();
                     state.showing.store(false, Ordering::Relaxed);
@@ -721,9 +827,33 @@ pub fn tick(
     let Some(l) = rt.layout.clone() else {
         return;
     };
+    let delta = now.saturating_sub(rt.last_orbit_tick).min(55);
+    rt.last_orbit_tick = now;
+    if !was {
+        rt.orbit_ready = false;
+        rt.orbit_ms = 0;
+    }
+    let movement_allowed = over_pet || (preview && !pointer_in_menu);
+    let moving = was && movement_allowed && rt.orbit_ready && l.rotates && delta > 0;
+    if moving {
+        rt.orbit_ms += delta;
+    }
+    let positions = if moving {
+        l.positions(rt.orbit_ms)
+    } else {
+        positions
+    };
     if let Some(w) = app.get_webview_window("shortcuts") {
-        let _ =
-            w.set_ignore_cursor_events(!l.buttons.iter().any(|p| distance(pos, *p) <= 24. * sf));
+        // The same positions feed the WebView and the native mouse hit testing.
+        let hit = positions
+            .iter()
+            .copied()
+            .chain(pager)
+            .any(|p| distance(pos, p) <= 24. * sf);
+        let _ = w.set_ignore_cursor_events(!hit);
+        if moving {
+            let _ = app.emit_to("shortcuts", "kuro-shortcuts-orbit", &positions);
+        }
         // DPI rounding can differ from the requested size by one pixel. Reapplying
         // geometry every hit-test tick rebuilds the WebView buttons and cancels animation.
         if !was || layout_changed {
@@ -786,12 +916,40 @@ pub fn tick(
 pub fn shortcut_layout(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Result<(), String> {
     authorize(&window, false)?;
     let state = app.state::<State>();
-    let rt = state.runtime.lock().unwrap();
-    if let Some(l) = &rt.layout {
+    let mut rt = state.runtime.lock().unwrap();
+    if let Some(mut l) = rt.layout.clone() {
+        l.buttons = l.positions(rt.orbit_ms);
+        rt.orbit_ready = false;
         let _ = app.emit_to(window.label(), "kuro-shortcuts-layout", l);
     }
     let _ = app.emit_to(window.label(), "kuro-shortcuts-visibility", rt.timer.open);
     Ok(())
+}
+
+#[tauri::command]
+pub fn shortcut_orbit_ready(window: tauri::WebviewWindow, app: tauri::AppHandle) {
+    if window.label() != "shortcuts" {
+        return;
+    }
+    let state = app.state::<State>();
+    let mut rt = state.runtime.lock().unwrap();
+    rt.orbit_ready = rt.timer.open;
+}
+
+#[tauri::command]
+pub fn shortcut_next_page(window: tauri::WebviewWindow, app: tauri::AppHandle) {
+    if window.label() != "shortcuts" {
+        return;
+    }
+    let state = app.state::<State>();
+    let mut rt = state.runtime.lock().unwrap();
+    if !rt.timer.open {
+        return;
+    }
+    if let Some(layout) = rt.layout.as_ref().filter(|l| l.pages > 1) {
+        rt.page = (layout.page + 1) % layout.pages;
+        rt.key = None;
+    }
 }
 
 #[tauri::command]
@@ -856,7 +1014,12 @@ mod tests {
     fn shortcuts_validation() {
         let i = item("a");
         assert!(validate(&[i.clone()], &[i.clone()]).is_ok());
-        assert!(validate(&vec![i.clone(); 9], &[i.clone()]).is_err());
+        let mut full: Vec<_> = (0..MAX_SHORTCUTS)
+            .map(|idx| item(&idx.to_string()))
+            .collect();
+        assert!(validate(&full, &full).is_ok());
+        full.push(item("overflow"));
+        assert!(validate(&full, &full).is_err());
         assert!(validate(&[i.clone(), i.clone()], &[i.clone()]).is_err());
         let mut bad = i.clone();
         bad.name = " ".into();
@@ -913,7 +1076,7 @@ mod tests {
     #[test]
     fn shortcuts_geometry() {
         for sf in [1., 1.5] {
-            for n in 1..=8 {
+            for n in 1..=MAX_SHORTCUTS {
                 for (x, y) in [
                     (-1920., 0.),
                     (-100., 0.),
@@ -933,7 +1096,7 @@ mod tests {
                         w: 250. * sf,
                         h: 250. * sf,
                     };
-                    let l = layout(pet, work, sf, n);
+                    let l = layout(pet, work, sf, n, 0);
                     for (i, a) in l.buttons.iter().enumerate() {
                         assert!(a.x - 24. * sf >= work.x - 0.01 && a.x + 24. * sf <= 0.01);
                         assert!(a.y - 24. * sf >= -0.01 && a.y + 24. * sf <= 1080.01);
@@ -945,6 +1108,115 @@ mod tests {
             }
         }
     }
+    #[test]
+    fn multi_ring_orbit_spacing_and_direction() {
+        let pet = Rect {
+            x: 930.,
+            y: 510.,
+            w: 140.,
+            h: 180.,
+        };
+        let work = Rect {
+            x: 0.,
+            y: 0.,
+            w: 2000.,
+            h: 1200.,
+        };
+        let l = layout(pet, work, 1., MAX_SHORTCUTS, 0);
+        assert!(l.rotates);
+        assert_eq!(l.buttons.len(), MAX_SHORTCUTS);
+        let rotated = l.positions(2000);
+        for (ring, direction) in [1., -1., 1.].into_iter().enumerate() {
+            let a = l.buttons[ring * SLOTS_PER_RING];
+            let b = rotated[ring * SLOTS_PER_RING];
+            let cross =
+                (a.x - l.anchor.x) * (b.y - l.anchor.y) - (a.y - l.anchor.y) * (b.x - l.anchor.x);
+            assert!(cross * direction > 0.);
+        }
+        for (i, a) in rotated.iter().enumerate() {
+            assert!(a.x >= l.x + 24. && a.x <= l.x + l.w - 24.);
+            assert!(a.y >= l.y + 24. && a.y <= l.y + l.h - 24.);
+            for b in rotated.iter().skip(i + 1) {
+                assert!(distance(*a, *b) >= 59.9);
+            }
+        }
+    }
+
+    #[test]
+    fn partial_ring_is_inside_complete_outer_rings() {
+        let pet = Rect {
+            x: 930.,
+            y: 510.,
+            w: 140.,
+            h: 180.,
+        };
+        let work = Rect {
+            x: 0.,
+            y: 0.,
+            w: 2000.,
+            h: 1200.,
+        };
+        for (count, groups) in [(12, vec![4, 8]), (17, vec![1, 8, 8]), (23, vec![7, 8, 8])] {
+            let l = layout(pet, work, 1., count, 0);
+            assert!(l.rotates && l.buttons.len() == count);
+            let rotated = l.positions(1200);
+            let mut first = 0;
+            let mut previous_radius = 0.;
+            for (ring, slots) in groups.into_iter().enumerate() {
+                let radius = distance(l.anchor, l.buttons[first]);
+                assert!(radius > previous_radius + 59.9);
+                for i in first..first + slots {
+                    assert!((distance(l.anchor, l.buttons[i]) - radius).abs() < 0.001);
+                    let a = l.buttons[i];
+                    let b = rotated[i];
+                    let cross = (a.x - l.anchor.x) * (b.y - l.anchor.y)
+                        - (a.y - l.anchor.y) * (b.x - l.anchor.x);
+                    assert_eq!(cross.is_sign_positive(), ring % 2 == 0);
+                }
+                first += slots;
+                previous_radius = radius;
+            }
+            assert_eq!(first, count);
+        }
+    }
+
+    #[test]
+    fn small_work_area_pages_cover_every_target() {
+        let pet = Rect {
+            x: 112.,
+            y: 83.,
+            w: 120.,
+            h: 150.,
+        };
+        let work = Rect {
+            x: 0.,
+            y: 0.,
+            w: 345.,
+            h: 310.,
+        };
+        let first = layout(pet, work, 1., MAX_SHORTCUTS, 0);
+        assert!(first.pages > 1 && first.pager.is_some());
+        let mut seen = 0;
+        for page in 0..first.pages {
+            let l = layout(pet, work, 1., MAX_SHORTCUTS, page);
+            assert_eq!(l.first, seen);
+            let pager = l.pager.unwrap();
+            assert!(
+                pager.x >= 24.
+                    && pager.x <= work.w - 24.
+                    && pager.y >= 24.
+                    && pager.y <= work.h - 24.
+            );
+            assert!(l
+                .buttons
+                .iter()
+                .all(|button| distance(pager, *button) >= 59.9));
+            assert_eq!(l.positions(2000), l.buttons);
+            seen += l.buttons.len();
+        }
+        assert_eq!(seen, MAX_SHORTCUTS);
+    }
+
     #[test]
     fn shortcuts_corridor() {
         assert!(

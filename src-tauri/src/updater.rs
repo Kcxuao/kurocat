@@ -3,9 +3,10 @@ use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 use tauri::{AppHandle, Emitter};
 
-const QIANYI_API_LATEST: &str = "https://qianyi.one/kurocat/releases/latest.json";
-const REPO_API_LATEST: &str = "https://api.github.com/repos/qianyiai/kurocat/releases/latest";
-const REPO_RELEASES_PAGE: &str = "https://github.com/qianyiai/kurocat/releases/latest";
+const REPO_API_LATEST: &str = "https://api.github.com/repos/Kcxuao/kurocat/releases/latest";
+const REPO_RELEASES_PAGE: &str = "https://github.com/Kcxuao/kurocat/releases";
+const RELEASES_PATH: &str = "/Kcxuao/kurocat/releases";
+const REPO_LATEST_PAGE: &str = "https://github.com/Kcxuao/kurocat/releases/latest";
 
 pub const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -69,9 +70,18 @@ pub fn parse_semver(raw: &str) -> (u64, u64, u64) {
     let clean = raw.trim().trim_start_matches(['v', 'V']);
     let main = clean.split('-').next().unwrap_or(clean);
     let mut parts = main.split('.');
-    let major = parts.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
-    let minor = parts.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
-    let patch = parts.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+    let major = parts
+        .next()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(0);
+    let minor = parts
+        .next()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(0);
+    let patch = parts
+        .next()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(0);
     (major, minor, patch)
 }
 
@@ -81,7 +91,11 @@ pub fn is_newer_version(latest: &str, current: &str) -> bool {
 
 fn extract_sha256(digest: &Option<String>) -> Option<String> {
     let raw = digest.as_deref()?.trim();
-    let hex = raw.strip_prefix("sha256:").unwrap_or(raw).trim().to_ascii_lowercase();
+    let hex = raw
+        .strip_prefix("sha256:")
+        .unwrap_or(raw)
+        .trim()
+        .to_ascii_lowercase();
     if hex.len() == 64 && hex.chars().all(|c| c.is_ascii_hexdigit()) {
         Some(hex)
     } else {
@@ -164,11 +178,17 @@ fn select_asset<'a>(assets: &'a [GhAsset], install_kind: &str) -> Option<&'a GhA
         }),
         "macos-app" => assets
             .iter()
-            .find(|a| a.name.to_ascii_lowercase().ends_with("-macos-universal.app.tar.gz"))
+            .find(|a| {
+                a.name
+                    .to_ascii_lowercase()
+                    .ends_with("-macos-universal.app.tar.gz")
+            })
             .or_else(|| {
-                assets
-                    .iter()
-                    .find(|a| a.name.to_ascii_lowercase().ends_with("-macos-universal.dmg"))
+                assets.iter().find(|a| {
+                    a.name
+                        .to_ascii_lowercase()
+                        .ends_with("-macos-universal.dmg")
+                })
             }),
         "linux-deb-arm64" => assets
             .iter()
@@ -243,12 +263,7 @@ fn parse_http_url(url: &str) -> Result<(bool, String, u16, String), String> {
         (authority, default_port)
     };
 
-    Ok((
-        is_https,
-        host.to_string(),
-        port,
-        path_and_query.to_string(),
-    ))
+    Ok((is_https, host.to_string(), port, path_and_query.to_string()))
 }
 
 /// Compact pure-Rust FIPS 180-4 SHA-256 hasher (zero external crate overhead, zero PowerShell).
@@ -263,21 +278,23 @@ struct Sha256 {
 #[cfg(any(windows, test))]
 impl Sha256 {
     const K: [u32; 64] = [
-        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
-        0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
-        0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
-        0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
-        0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
-        0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
-        0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4,
+        0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe,
+        0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f,
+        0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+        0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc,
+        0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
+        0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116,
+        0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7,
+        0xc67178f2,
     ];
 
     fn new() -> Self {
         Self {
             state: [
-                0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
-                0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+                0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
+                0x5be0cd19,
             ],
             buf: [0u8; 64],
             buf_len: 0,
@@ -394,12 +411,13 @@ pub(crate) mod winhttp_client {
     use windows_sys::Win32::Foundation::GetLastError;
     use windows_sys::Win32::Networking::WinHttp::{
         WinHttpCloseHandle, WinHttpConnect, WinHttpOpen, WinHttpOpenRequest,
-        WinHttpQueryDataAvailable, WinHttpQueryHeaders, WinHttpReadData, WinHttpReceiveResponse,
-        WinHttpSendRequest, WinHttpSetOption, WinHttpSetTimeouts,
-        WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_FLAG_SECURE,
-        WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_2, WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_3,
-        WINHTTP_OPTION_SECURE_PROTOCOLS, WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_QUERY_STATUS_CODE,
-        WINHTTP_OPTION_REDIRECT_POLICY, WINHTTP_OPTION_REDIRECT_POLICY_NEVER,
+        WinHttpQueryDataAvailable, WinHttpQueryHeaders, WinHttpQueryOption, WinHttpReadData,
+        WinHttpReceiveResponse, WinHttpSendRequest, WinHttpSetOption, WinHttpSetTimeouts,
+        WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+        WINHTTP_FLAG_SECURE, WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_2,
+        WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_3, WINHTTP_OPTION_REDIRECT_POLICY,
+        WINHTTP_OPTION_REDIRECT_POLICY_NEVER, WINHTTP_OPTION_SECURE_PROTOCOLS, WINHTTP_OPTION_URL,
+        WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_QUERY_STATUS_CODE,
     };
 
     struct Handle(*mut c_void);
@@ -428,20 +446,56 @@ pub(crate) mod winhttp_client {
         receive_timeout_ms: i32,
         on_chunk: impl FnMut(&[u8]) -> Result<(), String>,
     ) -> Result<(), String> {
-        request_stream(url, user_agent, extra_headers, None, receive_timeout_ms, on_chunk)
+        request_stream(
+            url,
+            user_agent,
+            extra_headers,
+            None,
+            receive_timeout_ms,
+            on_chunk,
+            None,
+        )
     }
 
     pub(crate) fn post_stream(
-        url: &str, headers: &str, body: &[u8],
+        url: &str,
+        headers: &str,
+        body: &[u8],
         on_chunk: impl FnMut(&[u8]) -> Result<(), String>,
     ) -> Result<(), String> {
-        request_stream(url, "KuroCat AI", Some(headers), Some(body), 30_000, on_chunk)
+        request_stream(
+            url,
+            "KuroCat AI",
+            Some(headers),
+            Some(body),
+            30_000,
+            on_chunk,
+            None,
+        )
+    }
+
+    pub(super) fn final_url(url: &str) -> Result<String, String> {
+        let mut result = String::new();
+        request_stream(
+            url,
+            "KuroCat",
+            None,
+            None,
+            12_000,
+            |_| Ok(()),
+            Some(&mut result),
+        )?;
+        Ok(result)
     }
 
     fn request_stream(
-        url: &str, user_agent: &str, extra_headers: Option<&str>, body: Option<&[u8]>,
+        url: &str,
+        user_agent: &str,
+        extra_headers: Option<&str>,
+        body: Option<&[u8]>,
         receive_timeout_ms: i32,
         mut on_chunk: impl FnMut(&[u8]) -> Result<(), String>,
+        resolved_url: Option<&mut String>,
     ) -> Result<(), String> {
         let (is_https, host, port, path) = parse_http_url(url)?;
         let ua_w = to_wide(user_agent);
@@ -532,25 +586,39 @@ pub(crate) mod winhttp_client {
         let (body_ptr, body_len) = if let Some(body) = body {
             // A provider cannot forward the configured bearer token to another host.
             let policy = WINHTTP_OPTION_REDIRECT_POLICY_NEVER;
-            if unsafe { WinHttpSetOption(request.0, WINHTTP_OPTION_REDIRECT_POLICY,
-                (&policy as *const u32).cast(), std::mem::size_of_val(&policy) as u32) } == 0
+            if unsafe {
+                WinHttpSetOption(
+                    request.0,
+                    WINHTTP_OPTION_REDIRECT_POLICY,
+                    (&policy as *const u32).cast(),
+                    std::mem::size_of_val(&policy) as u32,
+                )
+            } == 0
             {
                 return Err("无法关闭模型接口重定向。".into());
             }
             (body.as_ptr().cast(), body.len() as u32)
-        } else { (null(), 0) };
+        } else {
+            (null(), 0)
+        };
         let sent = unsafe {
             WinHttpSendRequest(request.0, hdr_ptr, hdr_len, body_ptr, body_len, body_len, 0)
         };
         if sent == 0 {
             let err = unsafe { GetLastError() };
-            return Err(format!("发送网络请求失败，请检查网络或代理 (错误码 {})", err));
+            return Err(format!(
+                "发送网络请求失败，请检查网络或代理 (错误码 {})",
+                err
+            ));
         }
 
         let received = unsafe { WinHttpReceiveResponse(request.0, null_mut()) };
         if received == 0 {
             let err = unsafe { GetLastError() };
-            return Err(format!("等待服务器响应失败，请检查网络或代理 (错误码 {})", err));
+            return Err(format!(
+                "等待服务器响应失败，请检查网络或代理 (错误码 {})",
+                err
+            ));
         }
 
         let mut status_code: u32 = 0;
@@ -573,6 +641,27 @@ pub(crate) mod winhttp_client {
             return Err(format!("服务器返回 HTTP {}", status_code));
         }
 
+        if let Some(result) = resolved_url {
+            let mut buffer = [0u16; 2048];
+            let mut bytes = std::mem::size_of_val(&buffer) as u32;
+            if unsafe {
+                WinHttpQueryOption(
+                    request.0,
+                    WINHTTP_OPTION_URL,
+                    buffer.as_mut_ptr().cast(),
+                    &mut bytes,
+                )
+            } == 0
+            {
+                return Err("无法读取 GitHub 发布页地址".into());
+            }
+            let end = buffer
+                .iter()
+                .position(|ch| *ch == 0)
+                .unwrap_or(buffer.len());
+            *result = String::from_utf16_lossy(&buffer[..end]);
+            return Ok(());
+        }
         let mut buf = vec![0u8; 32 * 1024];
         loop {
             let mut available: u32 = 0;
@@ -631,25 +720,21 @@ fn fetch_json_from_url(url: &str, accept: Option<&str>, timeout_ms: i32) -> Resu
 }
 
 #[cfg(windows)]
-fn fetch_latest_release_json() -> Result<String, String> {
-    // Primary: fast domestic CDN mirror (no proxy needed, zero GitHub API rate limit)
-    if let Ok(text) = fetch_json_from_url(QIANYI_API_LATEST, Some("Accept: application/json\r\n"), 8_000) {
-        if serde_json::from_str::<GhRelease>(&text).is_ok() {
-            return Ok(text);
-        }
-    }
-    // Fallback: official GitHub Releases API
-    fetch_json_from_url(
+fn fetch_latest_release_json() -> Result<Option<String>, String> {
+    match fetch_json_from_url(
         REPO_API_LATEST,
         Some("Accept: application/vnd.github+json\r\n"),
         20_000,
-    )
+    ) {
+        Ok(text) => Ok(Some(text)),
+        Err(error) if error == "服务器返回 HTTP 404" => Ok(None),
+        Err(error) => Err(error),
+    }
 }
 
 #[cfg(not(windows))]
-fn fetch_json_from_url(url: &str, accept: &str, connect_secs: &str, max_secs: &str) -> Result<String, String> {
+fn fetch_latest_release_json() -> Result<Option<String>, String> {
     use std::process::Command;
-
     let curl_bin = if cfg!(target_os = "macos") {
         "/usr/bin/curl"
     } else {
@@ -657,81 +742,173 @@ fn fetch_json_from_url(url: &str, accept: &str, connect_secs: &str, max_secs: &s
     };
     let output = Command::new(curl_bin)
         .args([
-            "-fsSL",
+            "-sSL",
             "--connect-timeout",
-            connect_secs,
+            "10",
             "--max-time",
-            max_secs,
+            "20",
+            "--write-out",
+            "\n%{http_code}",
             "-H",
             &format!("User-Agent: KuroCat/{}", CURRENT_VERSION),
             "-H",
-            accept,
-            url,
+            "Accept: application/vnd.github+json",
+            REPO_API_LATEST,
         ])
         .output()
-        .map_err(|e| format!("无法调用 curl 检查更新: {}", e))?;
-
+        .map_err(|e| format!("无法调用 curl 检查更新: {e}"))?;
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Err(if stderr.is_empty() {
-            "连接更新服务器失败，请检查网络或代理".to_string()
-        } else {
-            format!("检查更新失败: {}", stderr)
-        });
+        return Err(format!(
+            "检查更新失败: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
     }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let (body, status) = text.rsplit_once('\n').ok_or("更新接口未返回 HTTP 状态")?;
+    match status {
+        "200" if !body.trim().is_empty() => Ok(Some(body.to_owned())),
+        "404" => Ok(None),
+        _ => Err(format!("服务器返回 HTTP {status}")),
+    }
+}
 
-    let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if text.is_empty() {
-        return Err("更新接口返回空响应".to_string());
+fn is_fork_release_url(raw: &str, section: &str) -> bool {
+    let Ok(url) = tauri::Url::parse(raw) else {
+        return false;
+    };
+    let prefix = format!("{RELEASES_PATH}/{section}/");
+    url.scheme() == "https"
+        && url.host_str() == Some("github.com")
+        && url.port_or_known_default() == Some(443)
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url
+            .path()
+            .get(..prefix.len())
+            .is_some_and(|p| p.eq_ignore_ascii_case(&prefix))
+}
+
+fn update_info(release: Option<GhRelease>, current: &str, install_kind: &str) -> UpdateInfo {
+    let mut info = UpdateInfo {
+        current_version: current.to_owned(),
+        latest_version: current.to_owned(),
+        has_update: false,
+        release_url: REPO_RELEASES_PAGE.to_owned(),
+        asset_name: None,
+        download_url: None,
+        asset_sha256: None,
+        asset_size: None,
+        install_kind: install_kind.to_owned(),
+        notes_summary: String::new(),
+    };
+    if let Some(mut release) = release {
+        info.latest_version = release
+            .tag_name
+            .trim()
+            .trim_start_matches(['v', 'V'])
+            .to_owned();
+        info.has_update = is_newer_version(&info.latest_version, current);
+        if let Some(url) = release
+            .html_url
+            .filter(|url| is_fork_release_url(url, "tag"))
+        {
+            info.release_url = url;
+        }
+        release
+            .assets
+            .retain(|asset| is_fork_release_url(&asset.browser_download_url, "download"));
+        if let Some(asset) = select_asset(&release.assets, install_kind) {
+            info.asset_name = Some(asset.name.clone());
+            info.download_url = Some(asset.browser_download_url.clone());
+            info.asset_sha256 = extract_sha256(&asset.digest);
+            info.asset_size = asset.size;
+        }
+        info.notes_summary = summarize_notes(release.body.as_deref());
     }
-    Ok(text)
+    info
+}
+
+#[cfg(windows)]
+fn latest_page_url() -> Result<String, String> {
+    winhttp_client::final_url(REPO_LATEST_PAGE)
 }
 
 #[cfg(not(windows))]
-fn fetch_latest_release_json() -> Result<String, String> {
-    // Primary: fast domestic CDN mirror (no proxy needed, zero GitHub API rate limit)
-    if let Ok(text) = fetch_json_from_url(QIANYI_API_LATEST, "Accept: application/json", "5", "9") {
-        if serde_json::from_str::<GhRelease>(&text).is_ok() {
-            return Ok(text);
-        }
+fn latest_page_url() -> Result<String, String> {
+    let curl = if cfg!(target_os = "macos") {
+        "/usr/bin/curl"
+    } else {
+        "curl"
+    };
+    let output = std::process::Command::new(curl)
+        .args([
+            "-fsSL",
+            "--max-time",
+            "12",
+            "-o",
+            "/dev/null",
+            "-w",
+            "%{url_effective}",
+            REPO_LATEST_PAGE,
+        ])
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !output.status.success() {
+        return Err("无法读取 GitHub 发布页".into());
     }
-    // Fallback: official GitHub Releases API
-    fetch_json_from_url(REPO_API_LATEST, "Accept: application/vnd.github+json", "10", "20")
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+fn release_from_page(url: &str) -> Result<Option<GhRelease>, String> {
+    if url.eq_ignore_ascii_case(REPO_RELEASES_PAGE) {
+        return Ok(None);
+    }
+    if !is_fork_release_url(url, "tag") {
+        return Err("GitHub 未返回有效的 Fork 发布页".into());
+    }
+    let parsed = tauri::Url::parse(url).map_err(|e| e.to_string())?;
+    let tag = parsed.path().rsplit('/').next().unwrap_or("");
+    let version = tag.trim_start_matches(['v', 'V']);
+    if version.split('.').count() != 3
+        || !version
+            .split('.')
+            .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()))
+    {
+        return Err("GitHub 发布标签需要使用形如 v5.1.1 的版本号".into());
+    }
+    Ok(Some(GhRelease {
+        tag_name: tag.to_owned(),
+        html_url: Some(url.to_owned()),
+        body: None,
+        assets: Vec::new(),
+    }))
 }
 
 pub fn check_latest_update() -> Result<UpdateInfo, String> {
-    let raw_json = fetch_latest_release_json()?;
-    let rel: GhRelease = serde_json::from_str(&raw_json)
-        .map_err(|e| format!("解析最新版本信息失败: {}", e))?;
-
-    let latest_clean = rel
-        .tag_name
-        .trim()
-        .trim_start_matches(['v', 'V'])
-        .to_string();
-    let has_update = is_newer_version(&latest_clean, CURRENT_VERSION);
-    let install_kind = detect_install_kind();
-    let asset = select_asset(&rel.assets, install_kind);
-
-    let info = UpdateInfo {
-        current_version: CURRENT_VERSION.to_string(),
-        latest_version: latest_clean,
-        has_update,
-        release_url: rel
-            .html_url
-            .unwrap_or_else(|| REPO_RELEASES_PAGE.to_string()),
-        asset_name: asset.map(|a| a.name.clone()),
-        download_url: asset.map(|a| a.browser_download_url.clone()),
-        asset_sha256: asset.and_then(|a| extract_sha256(&a.digest)),
-        asset_size: asset.and_then(|a| a.size),
-        install_kind: install_kind.to_string(),
-        notes_summary: summarize_notes(rel.body.as_deref()),
+    let release = match fetch_latest_release_json() {
+        Ok(json) => json
+            .as_deref()
+            .map(serde_json::from_str)
+            .transpose()
+            .map_err(|e| format!("解析最新版本信息失败: {e}"))?,
+        Err(error) if error == "服务器返回 HTTP 403" || error == "服务器返回 HTTP 429" => {
+            latest_page_url()
+                .and_then(|url| release_from_page(&url))
+                .map_err(|fallback| format!("{error}。发布页检查失败：{fallback}"))?
+        }
+        Err(error) => return Err(error),
     };
+    let info = update_info(release, CURRENT_VERSION, detect_install_kind());
     store_cached_update_info(&info);
     Ok(info)
 }
 
-fn emit_progress(app: &AppHandle, stage: &str, message: impl Into<String>, info: Option<UpdateInfo>) {
+fn emit_progress(
+    app: &AppHandle,
+    stage: &str,
+    message: impl Into<String>,
+    info: Option<UpdateInfo>,
+) {
     let _ = app.emit(
         "kuro-update-status",
         UpdateProgressEvent {
@@ -773,13 +950,17 @@ pub fn open_url_in_browser(url: &str) {
 }
 
 #[cfg(windows)]
-fn download_and_verify_windows(url: &str, dest: &PathBuf, expected_sha256: Option<&str>) -> Result<(), String> {
+fn download_and_verify_windows(
+    url: &str,
+    dest: &PathBuf,
+    expected_sha256: Option<&str>,
+) -> Result<(), String> {
     use std::io::Write;
 
     let part_path = dest.with_extension("part");
     let _ = std::fs::remove_file(&part_path);
-    let mut file = std::fs::File::create(&part_path)
-        .map_err(|e| format!("无法创建下载临时文件: {}", e))?;
+    let mut file =
+        std::fs::File::create(&part_path).map_err(|e| format!("无法创建下载临时文件: {}", e))?;
 
     let ua = format!("KuroCat/{}", CURRENT_VERSION);
     let mut hasher = Sha256::new();
@@ -839,7 +1020,10 @@ fn install_windows_update(app: &AppHandle, info: &UpdateInfo) -> Result<(), Stri
         emit_progress(
             app,
             "up_to_date",
-            format!("已在浏览器打开 v{} Win7 兼容整合包下载页", info.latest_version),
+            format!(
+                "已在浏览器打开 v{} Win7 兼容整合包下载页",
+                info.latest_version
+            ),
             Some(info.clone()),
         );
         return Ok(());
@@ -849,10 +1033,7 @@ fn install_windows_update(app: &AppHandle, info: &UpdateInfo) -> Result<(), Stri
         .download_url
         .as_deref()
         .ok_or_else(|| "未找到匹配的 Windows 更新包".to_string())?;
-    let asset_name = info
-        .asset_name
-        .as_deref()
-        .unwrap_or("KuroCat-update.exe");
+    let asset_name = info.asset_name.as_deref().unwrap_or("KuroCat-update.exe");
 
     emit_progress(
         app,
@@ -979,7 +1160,9 @@ fn install_macos_update(app: &AppHandle, info: &UpdateInfo) -> Result<(), String
             "-H",
             &format!("User-Agent: KuroCat/{}", CURRENT_VERSION),
             "-o",
-            archive_path.to_str().unwrap_or("/tmp/KuroCat-update.app.tar.gz"),
+            archive_path
+                .to_str()
+                .unwrap_or("/tmp/KuroCat-update.app.tar.gz"),
             url,
         ])
         .output()
@@ -1002,7 +1185,11 @@ fn install_macos_update(app: &AppHandle, info: &UpdateInfo) -> Result<(), String
             .output()
             .map_err(|e| format!("校验失败: {}", e))?;
         let out_str = String::from_utf8_lossy(&shasum.stdout);
-        let actual = out_str.split_whitespace().next().unwrap_or("").to_ascii_lowercase();
+        let actual = out_str
+            .split_whitespace()
+            .next()
+            .unwrap_or("")
+            .to_ascii_lowercase();
         if actual != expected_sha.to_ascii_lowercase() {
             return Err("安装包 SHA-256 校验未通过".to_string());
         }
@@ -1040,7 +1227,11 @@ fn install_macos_update(app: &AppHandle, info: &UpdateInfo) -> Result<(), String
 
     // Clear quarantine flag so macOS Gatekeeper won't block the freshly updated open-source app
     let _ = Command::new("/usr/bin/xattr")
-        .args(["-dr", "com.apple.quarantine", new_app.to_str().unwrap_or("")])
+        .args([
+            "-dr",
+            "com.apple.quarantine",
+            new_app.to_str().unwrap_or(""),
+        ])
         .status();
 
     emit_progress(
@@ -1088,7 +1279,17 @@ fn install_macos_update(app: &AppHandle, info: &UpdateInfo) -> Result<(), String
     Ok(())
 }
 
-pub fn perform_update_install(app: &AppHandle, info: UpdateInfo) -> Result<(), String> {
+pub fn perform_update_install(app: &AppHandle, mut info: UpdateInfo) -> Result<(), String> {
+    if info
+        .download_url
+        .as_deref()
+        .is_some_and(|url| !is_fork_release_url(url, "download"))
+    {
+        return Err("更新包不属于 Kcxuao/kurocat 的 GitHub Release。".into());
+    }
+    if !is_fork_release_url(&info.release_url, "tag") {
+        info.release_url = REPO_RELEASES_PAGE.to_owned();
+    }
     if !info.has_update {
         emit_progress(
             app,
@@ -1159,7 +1360,9 @@ mod tests {
 
     #[test]
     fn sha256_extraction_validates_hex() {
-        let valid = Some("sha256:05c1be2c444f5303770f6d59e216bc0ed7b69321fc44368e4ec231405570f950".to_string());
+        let valid = Some(
+            "sha256:05c1be2c444f5303770f6d59e216bc0ed7b69321fc44368e4ec231405570f950".to_string(),
+        );
         assert_eq!(
             extract_sha256(&valid).as_deref(),
             Some("05c1be2c444f5303770f6d59e216bc0ed7b69321fc44368e4ec231405570f950")
@@ -1168,36 +1371,94 @@ mod tests {
     }
 
     #[test]
-    fn qianyi_mirror_latest_json_parses_assets_and_digest() {
+    fn fork_release_parses_assets_and_digest() {
         let sample = r#"{
             "tag_name": "v9.9.9",
-            "html_url": "https://qianyi.one/kurocat/",
+            "html_url": "https://github.com/Kcxuao/kurocat/releases/tag/v9.9.9",
             "body": "Performance & UX update",
             "assets": [
                 {
                     "name": "KuroCat-9.9.9-x64-setup.exe",
-                    "browser_download_url": "https://qianyi.one/kurocat/releases/v9.9.9/KuroCat-9.9.9-x64-setup.exe",
+                    "browser_download_url": "https://github.com/Kcxuao/kurocat/releases/download/v9.9.9/KuroCat-9.9.9-x64-setup.exe",
                     "size": 2250000,
                     "digest": "sha256:05c1be2c444f5303770f6d59e216bc0ed7b69321fc44368e4ec231405570f950"
                 },
                 {
                     "name": "KuroCat-9.9.9-macos-universal.app.tar.gz",
-                    "browser_download_url": "https://qianyi.one/kurocat/releases/v9.9.9/KuroCat-9.9.9-macos-universal.app.tar.gz",
+                    "browser_download_url": "https://github.com/Kcxuao/kurocat/releases/download/v9.9.9/KuroCat-9.9.9-macos-universal.app.tar.gz",
                     "size": 3100000,
                     "digest": "sha256:05c1be2c444f5303770f6d59e216bc0ed7b69321fc44368e4ec231405570f950"
                 }
             ]
         }"#;
-        let rel: GhRelease = serde_json::from_str(sample).expect("parse mirror json");
+        let rel: GhRelease = serde_json::from_str(sample).expect("parse fork release");
         assert!(is_newer_version(&rel.tag_name, CURRENT_VERSION));
         let win_asset = select_asset(&rel.assets, "windows-nsis").expect("select win nsis");
-        assert!(win_asset.browser_download_url.starts_with("https://qianyi.one/"));
+        assert!(is_fork_release_url(
+            &win_asset.browser_download_url,
+            "download"
+        ));
         assert_eq!(
             extract_sha256(&win_asset.digest).as_deref(),
             Some("05c1be2c444f5303770f6d59e216bc0ed7b69321fc44368e4ec231405570f950")
         );
         let mac_asset = select_asset(&rel.assets, "macos-app").expect("select mac tar.gz");
         assert!(mac_asset.name.ends_with(".app.tar.gz"));
+    }
+
+    #[test]
+    fn fallback_only_accepts_formal_fork_release() {
+        assert!(release_from_page(REPO_RELEASES_PAGE).unwrap().is_none());
+        let release =
+            release_from_page("https://github.com/Kcxuao/kurocat/releases/tag/v5.1.1").unwrap();
+        let info = update_info(release, "5.1.0", "windows-nsis");
+        assert!(info.has_update && info.download_url.is_none());
+        assert!(
+            release_from_page("https://github.com/Kcxuao/kurocat/releases/tag/v5.1.1-beta")
+                .is_err()
+        );
+        assert!(
+            release_from_page("https://github.com/qianyiai/kurocat/releases/tag/v5.1.1").is_err()
+        );
+    }
+
+    #[test]
+    fn missing_release_has_no_notification() {
+        let info = update_info(None, "5.1.0", "windows-nsis");
+        assert!(!info.has_update);
+        assert_eq!(info.release_url, REPO_RELEASES_PAGE);
+        assert!(info.download_url.is_none());
+    }
+
+    #[test]
+    fn newer_fork_release_notifies_but_only_offers_fork_downloads() {
+        let raw = r#"{
+            "tag_name":"v5.1.1",
+            "html_url":"https://github.com/Kcxuao/kurocat/releases/tag/v5.1.1",
+            "assets":[
+                {"name":"KuroCat-x64-setup.exe","browser_download_url":"https://github.com/qianyiai/kurocat/releases/download/v5.1.1/test.exe"},
+                {"name":"KuroCat_5.1.1_x64-setup.exe","browser_download_url":"https://github.com/kcxuao/kurocat/releases/download/v5.1.1/KuroCat_5.1.1_x64-setup.exe"}
+            ]
+        }"#;
+        let release = serde_json::from_str(raw).unwrap();
+        let info = update_info(Some(release), "5.1.0", "windows-nsis");
+        assert!(info.has_update);
+        assert_eq!(
+            info.asset_name.as_deref(),
+            Some("KuroCat_5.1.1_x64-setup.exe")
+        );
+        assert!(!is_fork_release_url(
+            "https://github.com.evil.example/Kcxuao/kurocat/releases/download/v5.1.1/test.exe",
+            "download"
+        ));
+        assert!(
+            !update_info(
+                Some(serde_json::from_str(raw).unwrap()),
+                "5.1.1",
+                "windows-nsis"
+            )
+            .has_update
+        );
     }
 
     #[test]
@@ -1225,14 +1486,13 @@ mod tests {
     #[test]
     fn http_url_parser_handles_github_endpoints() {
         let (https, host, port, path) =
-            parse_http_url("https://api.github.com/repos/qianyiai/kurocat/releases/latest").unwrap();
+            parse_http_url("https://api.github.com/repos/Kcxuao/kurocat/releases/latest").unwrap();
         assert!(https);
         assert_eq!(host, "api.github.com");
         assert_eq!(port, 443);
-        assert_eq!(path, "/repos/qianyiai/kurocat/releases/latest");
+        assert_eq!(path, "/repos/Kcxuao/kurocat/releases/latest");
 
-        let (https2, host2, port2, path2) =
-            parse_http_url("http://127.0.0.1:8080/dl?v=1").unwrap();
+        let (https2, host2, port2, path2) = parse_http_url("http://127.0.0.1:8080/dl?v=1").unwrap();
         assert!(!https2);
         assert_eq!(host2, "127.0.0.1");
         assert_eq!(port2, 8080);
@@ -1244,6 +1504,9 @@ mod tests {
     fn live_check_latest_update_uses_native_http() {
         let info = check_latest_update().expect("native WinHTTP release check should succeed");
         assert!(!info.latest_version.is_empty());
-        assert!(info.download_url.is_some());
+        assert!(info
+            .download_url
+            .as_deref()
+            .is_none_or(|url| is_fork_release_url(url, "download")));
     }
 }

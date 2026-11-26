@@ -46,11 +46,11 @@ impl Chord {
 
 fn effective(setting: Option<&str>, index: usize) -> Option<Chord> {
     match setting {
-        None => Some(Chord {
+        None if index < super::SLOTS_PER_RING => Some(Chord {
             modifiers: MOD_ALT,
             key: u32::from(b'1') + index as u32,
         }),
-        Some("") => None,
+        None | Some("") => None,
         Some(text) => Chord::parse(text),
     }
 }
@@ -208,6 +208,7 @@ mod tests {
     fn defaults_follow_order_and_custom_keys_do_not() {
         assert_eq!(effective(None, 0), Chord::parse("Alt+1"));
         assert_eq!(effective(None, 7), Chord::parse("Alt+8"));
+        assert_eq!(effective(None, 8), None);
         assert_eq!(
             effective(Some("Shift+Ctrl+J"), 4),
             Chord::parse("Ctrl+Shift+J")

@@ -1884,12 +1884,21 @@ fn start_hit_test_loop(
             mood::pet_hover(&app, (cx, cy), over_cat && !is_drag && !is_menu
                 && picker_bounds.is_none() && !feeding::is_walking(&app));
             #[cfg(windows)]
+            let over_file_drop = !is_win7_ulw && !effective_locked && inside_pet
+                && (0.12..=0.88).contains(&pet_rx) && (0.14..=0.70).contains(&pet_ry)
+                && unsafe {
+                    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
+                    (GetAsyncKeyState(VK_LBUTTON as i32) as u16 & 0x8000) != 0
+                };
+            #[cfg(not(windows))]
+            let over_file_drop = false;
+            #[cfg(windows)]
             shortcuts::tick(&app, Some((cx,cy)), Some(shortcuts::Rect {
                 x: win_x as f64 + pet_x0*w + bw*cur_scale*sf*0.20,
                 y: win_y as f64 + pet_y0*h + bh*cur_scale*sf*0.22,
                 w: bw*cur_scale*sf*0.60, h: bh*cur_scale*sf*0.60,
             }), over_cat, !effective_locked && !is_drag && !is_menu && picker_bounds.is_none()
-                && !mood::is_moving());
+                && !mood::is_moving() && !over_file_drop && !feeding::blocks_shortcut_hover(&app));
 
             #[cfg(windows)]
             if is_win7_ulw {
@@ -1906,15 +1915,6 @@ fn start_hit_test_loop(
                 && ai_chat::bubble_visible(&app);
             #[cfg(not(windows))]
             let over_ai_bubble = false;
-            #[cfg(windows)]
-            let over_file_drop = !is_win7_ulw && !effective_locked && inside_pet
-                && (0.12..=0.88).contains(&pet_rx) && (0.14..=0.70).contains(&pet_ry)
-                && unsafe {
-                    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
-                    (GetAsyncKeyState(VK_LBUTTON as i32) as u16 & 0x8000) != 0
-                };
-            #[cfg(not(windows))]
-            let over_file_drop = false;
             let should_ignore = if is_drag || over_banner || over_tail_picker || over_ai_bubble || over_file_drop {
                 false
             } else if effective_locked {
@@ -2566,6 +2566,10 @@ pub fn run() {
             shortcuts::launch_shortcut,
             #[cfg(windows)]
             shortcuts::shortcut_layout,
+            #[cfg(windows)]
+            shortcuts::shortcut_orbit_ready,
+            #[cfg(windows)]
+            shortcuts::shortcut_next_page,
             #[cfg(windows)]
             shortcuts::set_shortcut_effect,
             #[cfg(windows)]

@@ -91,16 +91,18 @@ export async function setupShortcutManager(): Promise<void> {
       badge.classList.toggle('shortcut-hotkey-conflict', current === 'conflict' || current === 'duplicate');
     }
   }
+  const maxShortcuts = 24;
   function makeHotkeyEditor(item: Shortcut, index: number): HTMLElement {
+    const defaultKey = index < 8 ? `Alt+${index + 1}` : undefined;
     const editor = document.createElement('details'); editor.className = 'shortcut-hotkey';
     const summary = document.createElement('summary');
     summary.dataset.hotkeyId = item.id;
     summary.dataset.chord = item.hotkey === '' ? '快捷键已关闭'
-      : (item.hotkey ?? `Alt+${index + 1}`).replaceAll('+', ' + ');
+      : (item.hotkey ?? defaultKey ?? '设置快捷键').replaceAll('+', ' + ');
     const optionsRow = document.createElement('div'); optionsRow.className = 'shortcut-actions';
     const modifier = options(modifiers, `${item.name} 的修饰键`);
     const key = options(keys, `${item.name} 的主键`);
-    const parts = (item.hotkey || `Alt+${index + 1}`).split('+');
+    const parts = (item.hotkey || defaultKey || 'Alt+K').split('+');
     key.value = parts.pop()!;
     modifier.value = modifiers.find(value => {
       const candidate = value.split('+');
@@ -121,7 +123,7 @@ export async function setupShortcutManager(): Promise<void> {
     hotkeys.checked = view.hotkeysEnabled ?? true;
     hotkeys.disabled = busy || Boolean(view.error);
     effectSelect.value = view.effect; effectSelect.disabled = busy || Boolean(view.error);
-    status.textContent = view.error || message || (view.items.length ? `${view.items.length}/8 个入口 · 停留在宠物上展开` : '还没有快捷入口，先添加文件夹或应用');
+    status.textContent = view.error || message || (view.items.length ? `${view.items.length}/${maxShortcuts} 个入口 · 外圈优先排满` : '还没有快捷入口，先添加文件夹或应用');
     view.items.forEach((item, index) => {
       const row = document.createElement('div'); row.className = 'shortcut-row';
       if (item.id === failedId) row.classList.add('shortcut-invalid');
@@ -152,8 +154,8 @@ export async function setupShortcutManager(): Promise<void> {
       row.append(icon, name, path, makeHotkeyEditor(item, index), controls); list.append(row);
     });
     updateBadges();
-    addFolder.disabled = addFile.disabled = view.items.length >= 8 || Boolean(view.error) || busy;
-    if (view.items.length >= 8 && !message && !view.error) status.textContent = '已达 8 个入口上限';
+    addFolder.disabled = addFile.disabled = view.items.length >= maxShortcuts || Boolean(view.error) || busy;
+    if (view.items.length >= maxShortcuts && !message && !view.error) status.textContent = `已达 ${maxShortcuts} 个入口上限`;
     if (view.error) panel.querySelectorAll('button').forEach(b => b.disabled = true);
   }
   await listen('kuro-shortcuts-changed', () => { if (!busy) void refresh().catch(error => { message = String(error); render(); }); });

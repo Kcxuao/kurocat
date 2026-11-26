@@ -55,6 +55,10 @@ jobs:
         run: |
           $tag = if ($env:GITHUB_REF_NAME -match '^v') { $env:GITHUB_REF_NAME } else { 'latest' }
           $ver = $tag.TrimStart('v')
+          $appVersion = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          if ($tag -ne 'latest' -and $ver -ne $appVersion) {
+            throw "Release tag $tag does not match installer version $appVersion"
+          }
           $nsis = Get-ChildItem "src-tauri/target/release/bundle/nsis/*-setup.exe" | Select-Object -First 1
           if ($nsis) {
             Copy-Item $nsis.FullName "KuroCat-$ver-x64-setup.exe"
@@ -64,6 +68,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: kurocat-windows-x64
+          if-no-files-found: error
           path: |
             KuroCat-*-x64-setup.exe
 
@@ -71,12 +76,13 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          draft: true
+          draft: ${{ github.repository != 'Kcxuao/kurocat' }}
+          fail_on_unmatched_files: true
           files: |
             KuroCat-*-x64-setup.exe
 
   build-macos:
-    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.linux_only) }}
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.linux_only) && !(github.repository == 'Kcxuao/kurocat' && startsWith(github.ref, 'refs/tags/v')) }}
     runs-on: macos-latest
     steps:
       - name: Checkout repository
@@ -158,7 +164,7 @@ jobs:
             KuroCat-*-macos-universal.app.tar.gz
 
   build-linux:
-    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.macos_only) }}
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.macos_only) && !(github.repository == 'Kcxuao/kurocat' && startsWith(github.ref, 'refs/tags/v')) }}
     strategy:
       fail-fast: false
       matrix:

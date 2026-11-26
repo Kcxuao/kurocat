@@ -2,3 +2,8 @@
 :root { color-scheme: dark; font-family: system-ui, sans-serif; }
 html, body { margin:0; background:transparent; overflow:hidden; user-select:none; }
 #shortcuts { position:absolute; inset:0; }
+
+.shortcut-pager { position:absolute; z-index:3; width:48px; height:48px; padding:0; border-radius:50%;
+  border:1px solid #bfe580; color:#f0ffd9; background:#242f2a; font:600 11px system-ui; cursor:pointer; }
+.shortcut-pager[hidden] { display:none; }
+.shortcut-pager:hover { background:#405233; }

@@ -37,7 +37,7 @@ export class ShortcutEffects {
   private hoverAmount: number[] = [];
   private done: (() => void) | null = null;
 
-  constructor(private root: HTMLElement) {
+  constructor(private root: HTMLElement, private onOpened?: () => void) {
     this.canvas.className = 'shortcut-fx'; this.canvas.setAttribute('aria-hidden', 'true');
     root.append(this.canvas); this.ctx = this.canvas.getContext('2d')!;
     root.dataset.open = 'false'; root.dataset.phase = 'closed';
@@ -64,6 +64,16 @@ export class ShortcutEffects {
     });
     this.poses = this.points.map(() => ({ ...this.anchor, scale: .05, rotation: 0, alpha: 0, stretch: 1 }));
   }
+  moveButtons(positions: EffectPoint[], layout: EffectLayout): void {
+    if (positions.length !== this.buttons.length) return;
+    this.points = positions.map(p => ({ x: (p.x - layout.x) / layout.sf, y: (p.y - layout.y) / layout.sf }));
+    this.points.forEach((p, i) => {
+      this.buttons[i].style.left = `${p.x - 24}px`;
+      this.buttons[i].style.top = `${p.y - 24}px`;
+    });
+    this.flights = this.points.map((to, i) => this.makeFlight(this.anchor, to, i));
+  }
+
   show(): void {
     if (!this.buttons.length || this.phase === 'opening' || this.phase === 'idle' || this.phase === 'click') return;
     this.flights = this.points.map((to, i) => this.makeFlight(this.phase === 'closing' ? this.poses[i] : this.anchor, to, i));
@@ -192,7 +202,10 @@ export class ShortcutEffects {
       button.classList.toggle('activated', phase === 'click' && i === this.selected);
     });
     this.paint();
-    if (phase === 'opening' && this.elapsed >= this.openingDuration()) this.begin('idle');
+    if (phase === 'opening' && this.elapsed >= this.openingDuration()) {
+      this.begin('idle');
+      this.onOpened?.();
+    }
     else if (phase === 'closing' && this.elapsed >= 420 + this.buttons.length * 26) { this.begin('closed'); this.draw(); }
     else if (phase === 'click' && this.elapsed >= 450) { this.begin('idle'); this.selected = -1; }
   }
