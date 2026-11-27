@@ -54,15 +54,15 @@ const clips: Record<Phase, Clip> = {
     left: [0.27, 0.59], right: [0.74, 0.56],
   },
   doze: {
-    keys: [[0, 0, 0, 0, 0, 0, 0], [490, -3, -3, -0.09, -0.04, -7, 7], [1150, -5, 8, -0.045, 0.06, -10, 12],
-      [1700, -13, 18, -0.16, 0.13, -16, 19], [1930, -6, 7, -0.07, 0.04, -12, 13],
-      [2560, -15, 21, -0.20, 0.15, -23, 27], [2790, -10, 14, -0.13, 0.10, -19, 20],
-      [3650, -17, 26, -0.26, 0.17, -28, 33]],
-    left: [0.39, 0.59], right: [0.64, 0.77],
+    keys: [[0, 0, 0, 0, 0, 0, 0], [490, -2, -5, -0.06, 0, -6, 4], [1150, -3, 5, -0.07, 0, -10, 8],
+      [1700, -9, 13, -0.17, 0, -15, 15], [1940, -6, 5, -0.10, 0, -11, 9],
+      [2560, -12, 17, -0.23, 0, -22, 19], [2820, -10, 11, -0.16, 0, -18, 15],
+      [3650, -16, 18, -0.29, 0, -28, 25]],
+    left: [0.385, 0.56], right: [0.65, 0.77],
   },
   wake: {
-    keys: [[0, -17, 26, -0.26, 0.17, -28, 33], [100, 4, -15, 0.10, -0.09, 19, -27],
-      [220, -8, 1, -0.09, 0.034, -13, 11], [395, 1, 2, 0.025, 0.015, 5, 1],
+    keys: [[0, -16, 18, -0.29, 0, -28, 25], [100, 4, -12, 0.12, 0, 19, -24],
+      [220, -5, 4, -0.075, 0, -13, 10], [395, 1, 2, 0.025, 0, 5, 1],
       [730, 0, 0, 0, 0, 0, 0]],
     left: [0.30, 0.59], right: [0.72, 0.62],
   },
@@ -110,9 +110,9 @@ export function sampleDaFeiYuMotion(phase: Phase, ms: number) {
     face = 'blink';
     if (ms > 3650) {
       const breath = Math.sin((ms - 3650) * 0.0028);
-      y += breath * 3.5;
-      tilt += breath * 0.018;
-      tailY += breath * 4;
+      y += breath * 2.4;
+      tilt += breath * 0.015;
+      tailY += Math.sin((ms - 3650) * 0.0028 - 0.55) * 4;
     }
   } else if (phase === 'wake' && ms > 230) {
     face = 'shy';
@@ -120,5 +120,6 @@ export function sampleDaFeiYuMotion(phase: Phase, ms: number) {
   const yawn = phase === 'doze' && ms < 1000 ? Math.sin(Math.PI * ms / 1000) : 0;
   const eyesWide = (phase === 'stumble' || phase === 'wake') && ms < 230;
   const sleeping = phase === 'doze' && ms > 2810;
-  return { x, y, tilt, squash, tailX, tailY, left, right, face, yawn, eyesWide, sleeping, ms };
+  const resting = phase === 'doze' || phase === 'wake';
+  return { x, y, tilt, squash, tailX, tailY, left, right, face, yawn, eyesWide, sleeping, resting, ms };
 }

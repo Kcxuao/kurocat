@@ -2257,11 +2257,13 @@ export class KuroCatEngine {
       const now = performance.now();
       const layout = this.buildDaFeiYuLayout();
       const showDesk = !this.dafeiyu.isFeeding && !this.dafeiyu.isPerforming;
-      this.dafeiyu.renderBody(ctx, now, layout);
+      const restInFront = showDesk && this.dafeiyu.restsInFrontOfDesk(now, layout);
+      if (!restInFront) this.dafeiyu.renderBody(ctx, now, layout);
       if (showDesk) {
         this.drawMiniMouse(ctx);
         this.drawKeyboard(ctx);
       }
+      if (restInFront) this.dafeiyu.renderBody(ctx, now, layout);
       this.dafeiyu.renderForeground(ctx, this.lastDt, now, layout);
       if (showDesk && this.showKeyBubbles && !this.privacyMode) {
         this.drawKeyBubbles(ctx);

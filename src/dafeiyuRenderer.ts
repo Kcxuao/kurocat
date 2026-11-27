@@ -95,6 +95,10 @@ export class DaFeiYuRenderer {
     return this.motion !== 'stop';
   }
 
+  public restsInFrontOfDesk(now: number, layout: DaFeiYuLayout): boolean {
+    return this.motionPose(now, layout)?.resting === true;
+  }
+
   private motionPose(now: number, layout: DaFeiYuLayout) {
     if (layout.privacyMode || this.isFeeding) return null;
     if (this.motion !== 'stop') return sampleDaFeiYuMotion(this.motion, Math.max(0, now - this.motionAt));
@@ -857,7 +861,7 @@ export class DaFeiYuRenderer {
     const img = this.sprites[exprKey] || this.sprites.idle;
     if (img && img.complete && img.naturalWidth > 0) {
       ctx.save();
-      if (!this.isFeeding && !this.isPerforming) {
+      if (!this.isFeeding && !this.isPerforming && !g.pose?.resting) {
         ctx.beginPath();
         ctx.rect(0, 0, layout.logicalW, layout.kbCenterY - layout.kbHeight * 0.36);
         ctx.clip();
